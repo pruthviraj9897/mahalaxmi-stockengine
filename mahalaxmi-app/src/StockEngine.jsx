@@ -3689,6 +3689,7 @@ function Expenses({ data, persist }) {
 
 function RecycleBin({ data, persist }) {
   const [confirmPurgeId, setConfirmPurgeId] = useState(null);
+  const [confirmRestoreId, setConfirmRestoreId] = useState(null);
 
   const entries = [...(data.recycleBin || [])].sort(
     (a, b) => new Date(b.deletedAt) - new Date(a.deletedAt)
@@ -3700,7 +3701,10 @@ function RecycleBin({ data, persist }) {
     return Math.max(0, Math.ceil(remainingMs / (24 * 60 * 60 * 1000)));
   };
 
-  const restore = (binId) => restoreFromBin(data, persist, binId);
+  const restore = (binId) => {
+    restoreFromBin(data, persist, binId);
+    setConfirmRestoreId(null);
+  };
   const purge = (binId) => {
     purgeFromBin(data, persist, binId);
     setConfirmPurgeId(null);
@@ -3725,7 +3729,13 @@ function RecycleBin({ data, persist }) {
               <span style={{ color: daysLeft(e.deletedAt) <= 1 ? COLORS.danger : "inherit" }}>
                 {daysLeft(e.deletedAt)} {daysLeft(e.deletedAt) === 1 ? "day" : "days"}
               </span>,
-              confirmPurgeId === e.binId ? (
+              confirmRestoreId === e.binId ? (
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Restore this item?</span>
+                  <button style={{ ...styles.iconBtn, color: "#2e7d32", borderColor: "#2e7d32" }} onClick={() => restore(e.binId)} title="Confirm restore"><CheckCircle2 size={14} /></button>
+                  <button style={styles.iconBtn} onClick={() => setConfirmRestoreId(null)} title="Cancel"><X size={14} /></button>
+                </div>
+              ) : confirmPurgeId === e.binId ? (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Delete forever?</span>
                   <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => purge(e.binId)} title="Confirm"><CheckCircle2 size={14} /></button>
@@ -3733,7 +3743,7 @@ function RecycleBin({ data, persist }) {
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button style={styles.ghostBtn} onClick={() => restore(e.binId)}>Restore</button>
+                  <button style={styles.ghostBtn} onClick={() => setConfirmRestoreId(e.binId)}>Restore</button>
                   <button style={styles.iconBtn} onClick={() => setConfirmPurgeId(e.binId)} title="Delete forever"><Trash2 size={14} /></button>
                 </div>
               ),
