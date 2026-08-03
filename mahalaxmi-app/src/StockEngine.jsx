@@ -3051,7 +3051,7 @@ function InvoicePrintView({ data, invoice }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
                 {/* LEFT — party details */}
                 <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
-                  <div><strong>Party:</strong> {partyName(data, invoice.partyId)}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>{partyName(data, invoice.partyId)}</div>
                   {party?.address && <div><strong>Address:</strong> {party.address}</div>}
                   {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
                   {refs.length > 0 && <div><strong>Ref:</strong> {refs.join(", ")}</div>}
