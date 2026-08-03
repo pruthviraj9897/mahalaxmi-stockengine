@@ -1751,38 +1751,20 @@ function partyCode(data, id) {
 
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
-  // portalRefs hold direct references to each portal's body-level DOM node,
-  // set via the domRef prop on PrintPortal. triggerPrint uses them to
-  // show/hide the right portal and call window.print() synchronously in the
-  // same click handler — no state change, no re-render, no mobile race.
-  const portalRefs = {
-    rented: useRef(null),
-    depot: useRef(null),
-    pending: useRef(null),
-  };
 
-  const triggerPrint = (mode) => {
-    const node = portalRefs[mode]?.current;
-    if (!node) return;
-    // Toggle the active class — only the chosen portal gets shown in print.
-    Object.entries(portalRefs).forEach(([key, ref]) => {
-      if (ref.current) ref.current.classList.toggle("print-portal--active", key === mode);
-    });
-    node.querySelectorAll(".table-wrap").forEach((el) => {
+  // Each portal carries a permanent unique class. triggerPrint sets a
+  // data-print attribute on <body> so CSS shows only that portal, then
+  // calls window.print() — no refs, no class toggling, no mobile races.
+  const triggerPrint = (key, portalClass) => {
+    document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
       el.style.maxHeight = "none";
       el.style.overflow = "visible";
       el.style.overflowX = "visible";
       el.style.overflowY = "visible";
     });
-    // Force a synchronous reflow so the browser flushes the class change
-    // before window.print() is called — without this, mobile browsers print
-    // the stale (all-hidden) layout and produce a blank page.
-    void node.offsetHeight;
+    document.body.setAttribute("data-print", key);
     window.print();
-    // Clean up after the print dialog closes.
-    Object.values(portalRefs).forEach((ref) => {
-      if (ref.current) ref.current.classList.remove("print-portal--active");
-    });
+    document.body.removeAttribute("data-print");
   };
 
   // Unfiltered — used for depot math, which must always reflect every party.
@@ -1873,12 +1855,12 @@ function Dashboard({ data }) {
           return (
             <div>
               <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} onClick={() => triggerPrint("rented")}>
+                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
                   <Printer size={13} /> Print / Save PDF
                 </button>
               </div>
               {rentedContent}
-              <PrintPortal domRef={portalRefs.rented}>{rentedContent}</PrintPortal>
+              <PrintPortal extraClass="print-portal--dashboard-rented">{rentedContent}</PrintPortal>
             </div>
           );
         })()}
@@ -1912,12 +1894,12 @@ function Dashboard({ data }) {
           return (
             <div>
               <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} onClick={() => triggerPrint("depot")}>
+                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
                   <Printer size={13} /> Print / Save PDF
                 </button>
               </div>
               {depotContent}
-              <PrintPortal domRef={portalRefs.depot}>{depotContent}</PrintPortal>
+              <PrintPortal extraClass="print-portal--dashboard-depot">{depotContent}</PrintPortal>
             </div>
           );
         })()}
@@ -1955,12 +1937,12 @@ function Dashboard({ data }) {
         return (
           <div>
             <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-              <button style={styles.ghostBtn} onClick={() => triggerPrint("pending")}>
+              <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-pending", "print-portal--dashboard-pending")}>
                 <Printer size={13} /> Print / Save PDF
               </button>
             </div>
             {pendingContent}
-            <PrintPortal domRef={portalRefs.pending}>{pendingContent}</PrintPortal>
+            <PrintPortal extraClass="print-portal--dashboard-pending">{pendingContent}</PrintPortal>
           </div>
         );
       })()}
@@ -3151,15 +3133,15 @@ function InvoicePrintView({ data, invoice }) {
     const dateLabel = invoice.billStart && invoice.billEnd ? `${fmtDateDisplay(invoice.billStart)} - ${fmtDateDisplay(invoice.billEnd)}` : "";
     const prevTitle = document.title;
     document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
-    // The invoice portal carries "print-portal--invoice" which CSS always
-    // shows during @media print — no --active toggling needed here.
     document.querySelectorAll(".print-portal--invoice .table-wrap").forEach((el) => {
       el.style.maxHeight = "none";
       el.style.overflow = "visible";
       el.style.overflowX = "visible";
       el.style.overflowY = "visible";
     });
+    document.body.setAttribute("data-print", "invoice");
     window.print();
+    document.body.removeAttribute("data-print");
     document.title = prevTitle;
   };
 
@@ -3268,34 +3250,22 @@ function PartyLedger({ data, persist }) {
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
   const party = data.parties.find((p) => p.id === partyId);
-  const portalRefs = {
-    rented: useRef(null),
-    timeline: useRef(null),
-  };
 
   // reset the payment form whenever the selected party changes
   useEffect(() => {
     setPaymentForm(emptyPaymentForm());
   }, [partyId]);
 
-  const triggerPrint = (mode) => {
-    const node = portalRefs[mode]?.current;
-    if (!node) return;
-    Object.entries(portalRefs).forEach(([key, ref]) => {
-      if (ref.current) ref.current.classList.toggle("print-portal--active", key === mode);
-    });
-    node.querySelectorAll(".table-wrap").forEach((el) => {
+  const triggerPrint = (key, portalClass) => {
+    document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
       el.style.maxHeight = "none";
       el.style.overflow = "visible";
       el.style.overflowX = "visible";
       el.style.overflowY = "visible";
     });
-    // Force synchronous reflow before printing — prevents blank page on mobile.
-    void node.offsetHeight;
+    document.body.setAttribute("data-print", key);
     window.print();
-    Object.values(portalRefs).forEach((ref) => {
-      if (ref.current) ref.current.classList.remove("print-portal--active");
-    });
+    document.body.removeAttribute("data-print");
   };
 
   const canSavePayment = partyId && Number(paymentForm.amount) > 0;
@@ -3515,12 +3485,12 @@ function PartyLedger({ data, persist }) {
             return (
               <div>
                 <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} onClick={() => triggerPrint("rented")}>
+                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
                     <Printer size={15} /> Print / Save PDF
                   </button>
                 </div>
                 {rentedContent}
-                <PrintPortal domRef={portalRefs.rented}>{rentedContent}</PrintPortal>
+                <PrintPortal extraClass="print-portal--ledger-rented">{rentedContent}</PrintPortal>
               </div>
             );
           })()}
@@ -3557,12 +3527,12 @@ function PartyLedger({ data, persist }) {
             return (
               <div>
                 <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} onClick={() => triggerPrint("timeline")}>
+                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
                     <Printer size={15} /> Print / Save PDF
                   </button>
                 </div>
                 {timelineContent}
-                <PrintPortal domRef={portalRefs.timeline}>{timelineContent}</PrintPortal>
+                <PrintPortal extraClass="print-portal--ledger-timeline">{timelineContent}</PrintPortal>
               </div>
             );
           })()}
@@ -4142,8 +4112,12 @@ const globalCss = `
        stay hidden. Using a class (not inline style) beats the !important on
        the base rule and works correctly on mobile Safari / Chrome. */
     .print-portal { display: none !important; }
-    .print-portal--active { display: block !important; padding: 10mm; box-sizing: border-box; }
-    .print-portal--invoice { display: block !important; padding: 10mm; box-sizing: border-box; }
+    body[data-print="invoice"]            .print-portal--invoice            { display: block !important; padding: 10mm; box-sizing: border-box; }
+    body[data-print="dashboard-rented"]   .print-portal--dashboard-rented  { display: block !important; padding: 10mm; box-sizing: border-box; }
+    body[data-print="dashboard-depot"]    .print-portal--dashboard-depot   { display: block !important; padding: 10mm; box-sizing: border-box; }
+    body[data-print="dashboard-pending"]  .print-portal--dashboard-pending { display: block !important; padding: 10mm; box-sizing: border-box; }
+    body[data-print="ledger-rented"]      .print-portal--ledger-rented     { display: block !important; padding: 10mm; box-sizing: border-box; }
+    body[data-print="ledger-timeline"]    .print-portal--ledger-timeline   { display: block !important; padding: 10mm; box-sizing: border-box; }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
     .table-wrap table { width: 100%; }
