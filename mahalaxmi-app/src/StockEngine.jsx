@@ -29,64 +29,6 @@ function PrintPortal({ children }) {
   return createPortal(children, nodeRef.current);
 }
 
-// Returns true when we're on a touch-primary mobile device. Used to swap the
-// print strategy: desktop uses @media print + PrintPortal; mobile uses a
-// full-screen overlay so the user can Share → Save as PDF or screenshot it,
-// because window.print() / @media print is unreliable on iOS Safari & Android Chrome.
-function isMobileDevice() {
-  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-    (typeof window !== "undefined" && window.innerWidth <= 768);
-}
-
-// Mobile print: portals content to a plain body-level div (same as PrintPortal),
-// forcibly resets all overflowing containers via JS, calls window.print(), then
-// tears down. No fixed/overflow wrappers — nothing to fight during print.
-function MobilePrintOverlay({ children, onClose }) {
-  const nodeRef = useRef(null);
-  if (!nodeRef.current) {
-    nodeRef.current = document.createElement("div");
-    nodeRef.current.className = "print-portal"; // reuse existing print-portal CSS
-  }
-
-  useEffect(() => {
-    const node = nodeRef.current;
-    document.body.appendChild(node);
-
-    // Fix all inline-style overflow/maxHeight constraints that @media print
-    // CSS cannot override (inline styles beat stylesheet !important on mobile).
-    const resetOverflows = () => {
-      node.querySelectorAll("*").forEach((el) => {
-        const s = el.style;
-        if (s.maxHeight && s.maxHeight !== "none") s.maxHeight = "none";
-        if (s.overflow && s.overflow !== "visible") s.overflow = "visible";
-        if (s.overflowY && s.overflowY !== "visible") s.overflowY = "visible";
-        if (s.overflowX && s.overflowX !== "visible") s.overflowX = "visible";
-        if (s.height && s.height.endsWith("px")) s.height = "auto";
-      });
-    };
-
-    const handleAfterPrint = () => {
-      onClose();
-    };
-    window.addEventListener("afterprint", handleAfterPrint);
-
-    // Wait for React to commit children into the portal node, then print
-    const id1 = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        resetOverflows();
-        window.print();
-      });
-    });
-
-    return () => {
-      cancelAnimationFrame(id1);
-      window.removeEventListener("afterprint", handleAfterPrint);
-      if (document.body.contains(node)) document.body.removeChild(node);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return createPortal(children, nodeRef.current);
-}
 
 
 // Dates are always stored as YYYY-MM-DD internally (required by <input type="date">).
@@ -1808,7 +1750,6 @@ function partyCode(data, id) {
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
   const [printMode, setPrintMode] = useState(null); // "rented" | "depot" | "pending" | null
-  const [mobileOverlayMode, setMobileOverlayMode] = useState(null);
   const printRequested = useRef(false);
 
   useEffect(() => {
@@ -1820,13 +1761,18 @@ function Dashboard({ data }) {
   useEffect(() => {
     if (printMode && printRequested.current) {
       printRequested.current = false;
-      if (isMobileDevice()) {
-        // On mobile: show full-screen overlay instead of calling window.print()
-        setMobileOverlayMode(printMode);
-        setPrintMode(null);
-      } else {
-        requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
-      }
+      // Same path for mobile and desktop — PrintPortal is always mounted so
+      // content is already in the DOM when window.print() fires.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        // Reset any inline overflow/maxHeight so table content isn't clipped
+        document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
+          el.style.maxHeight = "none";
+          el.style.overflow = "visible";
+          el.style.overflowX = "visible";
+          el.style.overflowY = "visible";
+        });
+        window.print();
+      }));
     }
   }, [printMode]);
 
@@ -1929,9 +1875,6 @@ function Dashboard({ data }) {
               </div>
               {rentedContent}
               {printMode === "rented" && <PrintPortal>{rentedContent}</PrintPortal>}
-              {mobileOverlayMode === "rented" && (
-                <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{rentedContent}</MobilePrintOverlay>
-              )}
             </div>
           );
         })()}
@@ -1971,9 +1914,6 @@ function Dashboard({ data }) {
               </div>
               {depotContent}
               {printMode === "depot" && <PrintPortal>{depotContent}</PrintPortal>}
-              {mobileOverlayMode === "depot" && (
-                <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{depotContent}</MobilePrintOverlay>
-              )}
             </div>
           );
         })()}
@@ -2017,9 +1957,6 @@ function Dashboard({ data }) {
             </div>
             {pendingContent}
             {printMode === "pending" && <PrintPortal>{pendingContent}</PrintPortal>}
-            {mobileOverlayMode === "pending" && (
-              <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{pendingContent}</MobilePrintOverlay>
-            )}
           </div>
         );
       })()}
@@ -3204,18 +3141,19 @@ function InvoiceArchive({ data, persist }) {
 
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
-  const [showMobileOverlay, setShowMobileOverlay] = useState(false);
 
   const handlePrint = () => {
-    if (isMobileDevice()) {
-      setShowMobileOverlay(true);
-      return;
-    }
     const party = data.parties.find((p) => p.id === invoice.partyId);
     const partyLabel = party ? party.name : "Invoice";
     const dateLabel = invoice.billStart && invoice.billEnd ? `${fmtDateDisplay(invoice.billStart)} - ${fmtDateDisplay(invoice.billEnd)}` : "";
     const prevTitle = document.title;
     document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
+    document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
+      el.style.maxHeight = "none";
+      el.style.overflow = "visible";
+      el.style.overflowX = "visible";
+      el.style.overflowY = "visible";
+    });
     window.print();
     document.title = prevTitle;
   };
@@ -3307,9 +3245,6 @@ function InvoicePrintView({ data, invoice }) {
       </div>
       {sheet}
       <PrintPortal>{sheet}</PrintPortal>
-      {showMobileOverlay && (
-        <MobilePrintOverlay onClose={() => setShowMobileOverlay(false)}>{sheet}</MobilePrintOverlay>
-      )}
     </Panel>
   );
 }
@@ -3326,7 +3261,6 @@ const emptyPaymentForm = () => ({
 function PartyLedger({ data, persist }) {
   const [partyId, setPartyId] = useState("");
   const [printMode, setPrintMode] = useState(null); // "rented" | "timeline" | null
-  const [mobileOverlayMode, setMobileOverlayMode] = useState(null);
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
   const party = data.parties.find((p) => p.id === partyId);
@@ -3349,13 +3283,16 @@ function PartyLedger({ data, persist }) {
   useEffect(() => {
     if (printMode && printRequested.current) {
       printRequested.current = false;
-      if (isMobileDevice()) {
-        setMobileOverlayMode(printMode);
-        setPrintMode(null);
-      } else {
-        // one extra frame so the browser has painted the portal before we print
-        requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
-      }
+      // Same path for mobile and desktop — PrintPortal always mounted.
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
+          el.style.maxHeight = "none";
+          el.style.overflow = "visible";
+          el.style.overflowX = "visible";
+          el.style.overflowY = "visible";
+        });
+        window.print();
+      }));
     }
   }, [printMode]);
 
@@ -3587,9 +3524,6 @@ function PartyLedger({ data, persist }) {
                 </div>
                 {rentedContent}
                 {printMode === "rented" && <PrintPortal>{rentedContent}</PrintPortal>}
-                {mobileOverlayMode === "rented" && (
-                  <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{rentedContent}</MobilePrintOverlay>
-                )}
               </div>
             );
           })()}
@@ -3632,9 +3566,6 @@ function PartyLedger({ data, persist }) {
                 </div>
                 {timelineContent}
                 {printMode === "timeline" && <PrintPortal>{timelineContent}</PrintPortal>}
-                {mobileOverlayMode === "timeline" && (
-                  <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{timelineContent}</MobilePrintOverlay>
-                )}
               </div>
             );
           })()}
