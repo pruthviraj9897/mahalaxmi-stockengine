@@ -1269,6 +1269,20 @@ export default function StockEngine({ session, onLogout }) {
     link.href = href;
   }, []);
 
+  // Prevent the Enter key from accidentally triggering Save/Add buttons
+  // while the user is typing in any input or select field.
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key !== "Enter") return;
+      const tag = e.target.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
