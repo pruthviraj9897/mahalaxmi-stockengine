@@ -39,39 +39,34 @@ function isMobileDevice() {
 }
 
 // Full-screen white overlay shown on mobile when the user taps "Print / Save PDF".
-// Renders the print content at full width so the user can use their browser's
-// native "Share → Save as PDF" or take a screenshot.
+// Renders the print content into the DOM first, then fires window.print() so the
+// browser's native print/save-PDF dialog opens with the real content visible.
 function MobilePrintOverlay({ children, onClose }) {
-  // Lock body scroll while overlay is open
+  // After the overlay paints, fire window.print() immediately so the native
+  // print dialog opens. After the dialog closes (afterprint), clean up.
   useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, []);
+    // Two rAF frames to ensure the browser has fully painted the overlay
+    const id1 = requestAnimationFrame(() => {
+      const id2 = requestAnimationFrame(() => {
+        window.print();
+      });
+      return () => cancelAnimationFrame(id2);
+    });
+    const handleAfterPrint = () => { onClose(); };
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => {
+      cancelAnimationFrame(id1);
+      window.removeEventListener("afterprint", handleAfterPrint);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return createPortal(
-    <div style={{
+    <div className="mobile-print-overlay" style={{
       position: "fixed", inset: 0, zIndex: 9999,
       background: "#fff", overflowY: "auto",
       fontFamily: "Georgia, 'Iowan Old Style', serif",
       color: "#241c14",
     }}>
-      {/* Floating close button — hidden when actually printing */}
-      <button
-        className="mobile-print-close-bar"
-        onClick={onClose}
-        style={{
-          position: "fixed", top: 12, right: 12, zIndex: 10000,
-          background: "#241c14", color: "#efe6d8",
-          border: "none", borderRadius: "50%",
-          width: 36, height: 36, fontSize: 18, cursor: "pointer",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
-        }}
-        aria-label="Close"
-      >
-        ✕
-      </button>
       <div style={{ padding: "16px 14px" }}>
         {children}
       </div>
@@ -4202,7 +4197,14 @@ const globalCss = `
     html, body { width: 100%; height: auto; }
     .app-shell { display: none !important; }
     .print-portal { display: block !important; padding: 10mm; box-sizing: border-box; }
-    .mobile-print-close-bar { display: none !important; }
+    /* Mobile overlay: show as a normal block so its content prints */
+    .mobile-print-overlay {
+      position: static !important;
+      overflow: visible !important;
+      z-index: auto !important;
+      padding: 10mm !important;
+      box-sizing: border-box !important;
+    }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
     .table-wrap table { width: 100%; }
