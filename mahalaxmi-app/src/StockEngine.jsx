@@ -1359,9 +1359,7 @@ export default function StockEngine({ session, onLogout }) {
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={styles.brandMark}>M</div>
-          <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: 0.2, color: COLORS.sidebarInk }}>
-            Mahalaxmi
-          </div>
+          <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: 0.2, color: COLORS.sidebarInk }}>Mahalaxmi</div>
         </div>
       </div>
 
@@ -1373,7 +1371,6 @@ export default function StockEngine({ session, onLogout }) {
           <div style={styles.brandMark}>M</div>
           <div>
             <div style={styles.brandName}>Mahalaxmi</div>
-            <div style={styles.brandSub}>Stock Engine</div>
           </div>
           <button
             className="mobile-close-btn"
@@ -2307,13 +2304,12 @@ function DeliveryEntry({ data, persist }) {
               <Empty text="No delivery challans for this party." />
             ) : (
             <Table
-              cols={["Challan No.", "Date", "Party", "Items", "Last Changed", ""]}
+              cols={["Challan No.", "Date", "Party", "Items", ""]}
               rows={sortedChallans.map((c) => [
                 c.challanNo,
                 fmtDateDisplay(c.date),
                 partyName(data, c.partyId),
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
-                fmtDateTime(c.updatedAt || c.createdAt),
                 <div style={{ display: "flex", gap: 6 }}>
                   <button style={styles.iconBtn} onClick={() => startEdit(c)} title="Edit challan"><Pencil size={14} /></button>
                   <ConfirmDelete
@@ -2545,13 +2541,12 @@ function ReturnEntry({ data, persist }) {
               <Empty text="No return challans for this party." />
             ) : (
             <Table
-              cols={["Return No.", "Date", "Party", "Items", "Last Changed", ""]}
+              cols={["Return No.", "Date", "Party", "Items", ""]}
               rows={sortedChallans.map((c) => [
                 c.returnChallanNo,
                 fmtDateDisplay(c.date),
                 partyName(data, c.partyId),
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
-                fmtDateTime(c.updatedAt || c.createdAt),
                 <div style={{ display: "flex", gap: 6 }}>
                   <button style={styles.iconBtn} onClick={() => startEdit(c)} title="Edit return"><Pencil size={14} /></button>
                   <ConfirmDelete
