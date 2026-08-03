@@ -76,7 +76,7 @@ function SortToggle({ value, onChange, options, style }) {
 // Entry, Invoice Archive, and the Dashboard.
 function PartyFilter({ parties, value, onChange }) {
   return (
-    <label style={{ ...styles.field, minWidth: 200 }}>
+    <label className="party-filter-wrap" style={{ ...styles.field, minWidth: 200 }}>
       <span style={styles.fieldLabel}>Filter by Party</span>
       <select style={styles.select} value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">All Parties</option>
@@ -1803,7 +1803,7 @@ function Dashboard({ data }) {
         <PartyFilter parties={data.parties} value={filterPartyId} onChange={setFilterPartyId} />
       </div>
 
-      <div style={styles.grid2}>
+      <div className="grid2" style={styles.grid2}>
         <Panel title="Party-wise Rented Stock" hint={filterPartyId ? "Delivered − Returned, filtered to the selected party" : "Delivered − Returned, per party & item"}>
           {rented.length === 0 ? (
             <Empty text={filterPartyId ? "No delivery entries for this party." : "No delivery entries yet."} />
@@ -2268,7 +2268,7 @@ function DeliveryEntry({ data, persist }) {
           <Field label="Deposit" type="number" value={header.deposit} onChange={(v) => setHeader({ ...header, deposit: v })} />
         </div>
 
-        <div style={styles.lineHeaderRow}>
+        <div className="line-header-row" style={styles.lineHeaderRow}>
           <span style={{ flex: 3 }}>Item</span>
           <span style={{ flex: 1 }}>Qty</span>
           <span style={{ flex: 1 }}>Rate</span>
@@ -2487,7 +2487,7 @@ function ReturnEntry({ data, persist }) {
 
         {header.partyId && partyItems.length > 0 && (
           <>
-            <div style={styles.lineHeaderRow}>
+            <div className="line-header-row" style={styles.lineHeaderRow}>
               <span style={{ flex: 2 }}>Item</span>
               <span style={{ flex: 2 }}>Against Challan (pending qty)</span>
               <span style={{ flex: 1 }}>Return Qty</span>
@@ -2817,7 +2817,7 @@ function InvoiceBuilder({ data, persist }) {
               ) : (
                 <div style={{ overflowX: "auto" }}>
                   {/* Editable header */}
-                  <div style={{ ...styles.lineHeaderRow, gap: 6 }}>
+                  <div className="line-header-row" style={{ ...styles.lineHeaderRow, gap: 6 }}>
                     <span style={{ width: 24, flexShrink: 0 }}>#</span>
                     <span style={{ flex: 3, minWidth: 110 }}>Item Name</span>
                     <span style={{ flex: 1, minWidth: 55 }}>Qty</span>
@@ -4036,6 +4036,9 @@ const globalCss = `
     @page { size: A4 portrait; margin: 0; }
   }
 
+  /* ---- Two-column grid (desktop default) ---- */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+
   /* ---- Mobile layout (phones/small tablets) ---- */
   .mobile-topbar { display: none; }
   .mobile-backdrop { display: none; }
@@ -4101,13 +4104,41 @@ const globalCss = `
       width: 100% !important;
       padding: 14px !important;
     }
+
+    /* Fix 1: app root — allow CSS to control min-height on mobile */
+    .app-shell { min-height: 100svh; }
+
+    /* Fix 2: grid2 — stack to single column on mobile */
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    /* Fix 3: line-header-row — hide column labels on mobile (fields get minWidth so they self-label) */
+    .line-header-row { display: none !important; }
+
+    /* Fix 4/5: line row inputs/selects — give each a comfortable min-width so they
+       wrap to a new line in pairs rather than squishing to ~45px */
+    .main-content select,
+    .main-content input[type="number"],
+    .main-content input[type="text"],
+    .main-content input[type="date"] {
+      min-width: 100px;
+    }
+
+    /* Fix 6: party filter wrapper — full width on mobile so it doesn't overflow */
+    .party-filter-wrap {
+      width: 100%;
+      min-width: unset !important;
+    }
+    .party-filter-wrap select { width: 100%; }
   }
 `;
 
 const styles = {
   app: {
     display: "flex",
-    minHeight: "600px",
     fontFamily: "'Georgia', 'Iowan Old Style', serif",
     background: COLORS.bg,
     color: COLORS.ink,
@@ -4152,12 +4183,12 @@ const styles = {
     background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10,
     padding: 18, marginBottom: 18,
   },
-  panelHeader: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 },
+  panelHeader: { display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14, flexWrap: "wrap", gap: 4 },
   statRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 },
   statCard: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "14px 16px" },
   statValue: { fontSize: 24, fontWeight: 700, color: COLORS.amber },
   statLabel: { fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif", marginTop: 2 },
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 },
+  grid2: {}, // layout handled by .grid2 CSS class (see globalCss)
   formRow: { display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" },
   field: { display: "flex", flexDirection: "column", gap: 4, minWidth: 120 },
   fieldLabel: { fontSize: 11, color: COLORS.muted, fontFamily: "system-ui, sans-serif" },
@@ -4185,7 +4216,7 @@ const styles = {
     color: COLORS.muted, cursor: "pointer",
   },
   lineHeaderRow: { display: "flex", gap: 8, fontSize: 11, color: COLORS.muted, fontFamily: "system-ui, sans-serif", padding: "0 2px 4px", marginTop: 6 },
-  lineRow: { display: "flex", gap: 8, alignItems: "center", marginBottom: 6 },
+  lineRow: { display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" },
   tableWrap: { overflowX: "auto", overflowY: "auto", maxHeight: 460, borderRadius: 6 },
   table: { width: "100%", borderCollapse: "collapse", fontFamily: "system-ui, sans-serif" },
   th: {
