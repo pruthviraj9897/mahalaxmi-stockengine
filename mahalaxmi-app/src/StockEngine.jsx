@@ -1750,7 +1750,6 @@ function partyCode(data, id) {
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
   const [printMode, setPrintMode] = useState(null); // "rented" | "depot" | "pending" | null
-  const printRequested = useRef(false);
 
   useEffect(() => {
     const clear = () => setPrintMode(null);
@@ -1758,27 +1757,19 @@ function Dashboard({ data }) {
     return () => window.removeEventListener("afterprint", clear);
   }, []);
 
-  useEffect(() => {
-    if (printMode && printRequested.current) {
-      printRequested.current = false;
-      // Same path for mobile and desktop — PrintPortal is always mounted so
-      // content is already in the DOM when window.print() fires.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        // Reset any inline overflow/maxHeight so table content isn't clipped
-        document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
-          el.style.maxHeight = "none";
-          el.style.overflow = "visible";
-          el.style.overflowX = "visible";
-          el.style.overflowY = "visible";
-        });
-        window.print();
-      }));
-    }
-  }, [printMode]);
-
+  // Portals are always mounted (not conditional on printMode) so their DOM
+  // nodes already exist when triggerPrint runs — no re-render race on mobile.
   const triggerPrint = (mode) => {
-    printRequested.current = true;
     setPrintMode(mode);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
+        el.style.maxHeight = "none";
+        el.style.overflow = "visible";
+        el.style.overflowX = "visible";
+        el.style.overflowY = "visible";
+      });
+      window.print();
+    }));
   };
 
   // Unfiltered — used for depot math, which must always reflect every party.
@@ -1874,7 +1865,7 @@ function Dashboard({ data }) {
                 </button>
               </div>
               {rentedContent}
-              {printMode === "rented" && <PrintPortal>{rentedContent}</PrintPortal>}
+              <PrintPortal>{printMode === "rented" ? rentedContent : null}</PrintPortal>
             </div>
           );
         })()}
@@ -1913,7 +1904,7 @@ function Dashboard({ data }) {
                 </button>
               </div>
               {depotContent}
-              {printMode === "depot" && <PrintPortal>{depotContent}</PrintPortal>}
+              <PrintPortal>{printMode === "depot" ? depotContent : null}</PrintPortal>
             </div>
           );
         })()}
@@ -1956,7 +1947,7 @@ function Dashboard({ data }) {
               </button>
             </div>
             {pendingContent}
-            {printMode === "pending" && <PrintPortal>{pendingContent}</PrintPortal>}
+            <PrintPortal>{printMode === "pending" ? pendingContent : null}</PrintPortal>
           </div>
         );
       })()}
@@ -3264,8 +3255,6 @@ function PartyLedger({ data, persist }) {
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
   const party = data.parties.find((p) => p.id === partyId);
-  const printRequested = useRef(false);
-
   useEffect(() => {
     const clear = () => setPrintMode(null);
     window.addEventListener("afterprint", clear);
@@ -3277,28 +3266,19 @@ function PartyLedger({ data, persist }) {
     setPaymentForm(emptyPaymentForm());
   }, [partyId]);
 
-  // Only print once React has actually committed the PrintPortal to the DOM
-  // (printMode changed) — a fixed setTimeout can fire before that commit,
-  // especially on slower mobile renders, leaving the print preview blank.
-  useEffect(() => {
-    if (printMode && printRequested.current) {
-      printRequested.current = false;
-      // Same path for mobile and desktop — PrintPortal always mounted.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
-          el.style.maxHeight = "none";
-          el.style.overflow = "visible";
-          el.style.overflowX = "visible";
-          el.style.overflowY = "visible";
-        });
-        window.print();
-      }));
-    }
-  }, [printMode]);
-
+  // Portals are always mounted so their DOM nodes exist before triggerPrint
+  // runs — eliminates the re-render race that caused blank prints on mobile.
   const triggerPrint = (mode) => {
-    printRequested.current = true;
     setPrintMode(mode);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
+        el.style.maxHeight = "none";
+        el.style.overflow = "visible";
+        el.style.overflowX = "visible";
+        el.style.overflowY = "visible";
+      });
+      window.print();
+    }));
   };
 
   const canSavePayment = partyId && Number(paymentForm.amount) > 0;
@@ -3523,7 +3503,7 @@ function PartyLedger({ data, persist }) {
                   </button>
                 </div>
                 {rentedContent}
-                {printMode === "rented" && <PrintPortal>{rentedContent}</PrintPortal>}
+                <PrintPortal>{printMode === "rented" ? rentedContent : null}</PrintPortal>
               </div>
             );
           })()}
@@ -3565,7 +3545,7 @@ function PartyLedger({ data, persist }) {
                   </button>
                 </div>
                 {timelineContent}
-                {printMode === "timeline" && <PrintPortal>{timelineContent}</PrintPortal>}
+                <PrintPortal>{printMode === "timeline" ? timelineContent : null}</PrintPortal>
               </div>
             );
           })()}
