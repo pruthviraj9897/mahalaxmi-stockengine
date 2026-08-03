@@ -1747,6 +1747,26 @@ function partyCode(data, id) {
 
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
+  const [printMode, setPrintMode] = useState(null); // "rented" | "depot" | "pending" | null
+  const printRequested = useRef(false);
+
+  useEffect(() => {
+    const clear = () => setPrintMode(null);
+    window.addEventListener("afterprint", clear);
+    return () => window.removeEventListener("afterprint", clear);
+  }, []);
+
+  useEffect(() => {
+    if (printMode && printRequested.current) {
+      printRequested.current = false;
+      requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+    }
+  }, [printMode]);
+
+  const triggerPrint = (mode) => {
+    printRequested.current = true;
+    setPrintMode(mode);
+  };
 
   // Unfiltered — used for depot math, which must always reflect every party.
   const allRented = useMemo(() => {
@@ -1804,56 +1824,129 @@ function Dashboard({ data }) {
       </div>
 
       <div className="grid2" style={styles.grid2}>
-        <Panel title="Party-wise Rented Stock" hint={filterPartyId ? "Delivered − Returned, filtered to the selected party" : "Delivered − Returned, per party & item"}>
-          {rented.length === 0 ? (
-            <Empty text={filterPartyId ? "No delivery entries for this party." : "No delivery entries yet."} />
-          ) : (
-            <Table
-              cols={["Party", "Item", "Delivered", "Returned", "Currently Rented"]}
-              rows={rented.map((r) => [
-                `${partyCode(data, r.partyId)} — ${partyName(data, r.partyId)}`,
-                `${itemCode(data, r.itemId)} — ${itemName(data, r.itemId)}`,
-                r.delivered,
-                r.returned,
-                <strong style={{ color: r.current > 0 ? "var(--amber)" : "var(--muted)" }}>{r.current}</strong>,
-              ])}
-            />
-          )}
-        </Panel>
+        {(() => {
+          const rentedContent = (
+            <>
+              <div style={styles.invoiceLetterhead}>
+                <div style={styles.invoiceCompany}>{(data.company || DEFAULT_COMPANY).name}</div>
+                <div style={styles.invoiceTagline}>{(data.company || DEFAULT_COMPANY).tagline}</div>
+                <div style={styles.invoiceAddress}>{(data.company || DEFAULT_COMPANY).address}</div>
+                <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>
+                  PARTY-WISE RENTED STOCK{filterPartyId ? ` — ${partyName(data, filterPartyId)}` : " — ALL PARTIES"}
+                </div>
+              </div>
+              <Panel title="Party-wise Rented Stock" hint={filterPartyId ? "Delivered − Returned, filtered to the selected party" : "Delivered − Returned, per party & item"}>
+                {rented.length === 0 ? (
+                  <Empty text={filterPartyId ? "No delivery entries for this party." : "No delivery entries yet."} />
+                ) : (
+                  <Table
+                    cols={["Party", "Item", "Delivered", "Returned", "Currently Rented"]}
+                    rows={rented.map((r) => [
+                      `${partyCode(data, r.partyId)} — ${partyName(data, r.partyId)}`,
+                      `${itemCode(data, r.itemId)} — ${itemName(data, r.itemId)}`,
+                      r.delivered,
+                      r.returned,
+                      <strong style={{ color: r.current > 0 ? "var(--amber)" : "var(--muted)" }}>{r.current}</strong>,
+                    ])}
+                  />
+                )}
+              </Panel>
+            </>
+          );
+          return (
+            <div>
+              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+                <button style={styles.ghostBtn} onClick={() => triggerPrint("rented")}>
+                  <Printer size={13} /> Print / Save PDF
+                </button>
+              </div>
+              {rentedContent}
+              {printMode === "rented" && <PrintPortal>{rentedContent}</PrintPortal>}
+            </div>
+          );
+        })()}
 
-        <Panel title="Depot Stock Available" hint="Total owned − currently rented to all parties">
-          {depotAvailable.length === 0 ? (
-            <Empty text="Add items in Item Master first." />
-          ) : (
-            <Table
-              cols={["Item", "Total Depot Stock", "Rented Out", "Available"]}
-              rows={depotAvailable.map((it) => [
-                `${it.code} — ${it.name}`,
-                it.totalDepotStock,
-                it.rentedOut,
-                <strong style={{ color: it.available < 0 ? "var(--danger)" : "var(--ink)" }}>{it.available}</strong>,
-              ])}
-            />
-          )}
-        </Panel>
+        {(() => {
+          const depotContent = (
+            <>
+              <div style={styles.invoiceLetterhead}>
+                <div style={styles.invoiceCompany}>{(data.company || DEFAULT_COMPANY).name}</div>
+                <div style={styles.invoiceTagline}>{(data.company || DEFAULT_COMPANY).tagline}</div>
+                <div style={styles.invoiceAddress}>{(data.company || DEFAULT_COMPANY).address}</div>
+                <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>DEPOT STOCK AVAILABLE</div>
+              </div>
+              <Panel title="Depot Stock Available" hint="Total owned − currently rented to all parties">
+                {depotAvailable.length === 0 ? (
+                  <Empty text="Add items in Item Master first." />
+                ) : (
+                  <Table
+                    cols={["Item", "Total Depot Stock", "Rented Out", "Available"]}
+                    rows={depotAvailable.map((it) => [
+                      `${it.code} — ${it.name}`,
+                      it.totalDepotStock,
+                      it.rentedOut,
+                      <strong style={{ color: it.available < 0 ? "var(--danger)" : "var(--ink)" }}>{it.available}</strong>,
+                    ])}
+                  />
+                )}
+              </Panel>
+            </>
+          );
+          return (
+            <div>
+              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+                <button style={styles.ghostBtn} onClick={() => triggerPrint("depot")}>
+                  <Printer size={13} /> Print / Save PDF
+                </button>
+              </div>
+              {depotContent}
+              {printMode === "depot" && <PrintPortal>{depotContent}</PrintPortal>}
+            </div>
+          );
+        })()}
       </div>
 
-      <Panel title="Pending Challan Stock" hint={filterPartyId ? "Per delivery challan, quantity not yet returned — filtered to the selected party" : "Per delivery challan, quantity not yet returned"}>
-        {pendingChallanRows.length === 0 ? (
-          <Empty text={filterPartyId ? "Nothing outstanding for this party." : "Nothing outstanding — every challan fully returned."} />
-        ) : (
-          <Table
-            cols={["Challan No.", "Date", "Party", "Item", "Pending Qty"]}
-            rows={pendingChallanRows.map((r) => [
-              r.challanNo,
-              fmtDateDisplay(r.date),
-              partyName(data, r.partyId),
-              itemName(data, r.itemId),
-              <strong>{r.pending}</strong>,
-            ])}
-          />
-        )}
-      </Panel>
+      {(() => {
+        const pendingContent = (
+          <>
+            <div style={styles.invoiceLetterhead}>
+              <div style={styles.invoiceCompany}>{(data.company || DEFAULT_COMPANY).name}</div>
+              <div style={styles.invoiceTagline}>{(data.company || DEFAULT_COMPANY).tagline}</div>
+              <div style={styles.invoiceAddress}>{(data.company || DEFAULT_COMPANY).address}</div>
+              <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>
+                PENDING CHALLAN STOCK{filterPartyId ? ` — ${partyName(data, filterPartyId)}` : " — ALL PARTIES"}
+              </div>
+            </div>
+            <Panel title="Pending Challan Stock" hint={filterPartyId ? "Per delivery challan, quantity not yet returned — filtered to the selected party" : "Per delivery challan, quantity not yet returned"}>
+              {pendingChallanRows.length === 0 ? (
+                <Empty text={filterPartyId ? "Nothing outstanding for this party." : "Nothing outstanding — every challan fully returned."} />
+              ) : (
+                <Table
+                  cols={["Challan No.", "Date", "Party", "Item", "Pending Qty"]}
+                  rows={pendingChallanRows.map((r) => [
+                    r.challanNo,
+                    fmtDateDisplay(r.date),
+                    partyName(data, r.partyId),
+                    itemName(data, r.itemId),
+                    <strong>{r.pending}</strong>,
+                  ])}
+                />
+              )}
+            </Panel>
+          </>
+        );
+        return (
+          <div>
+            <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+              <button style={styles.ghostBtn} onClick={() => triggerPrint("pending")}>
+                <Printer size={13} /> Print / Save PDF
+              </button>
+            </div>
+            {pendingContent}
+            {printMode === "pending" && <PrintPortal>{pendingContent}</PrintPortal>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
