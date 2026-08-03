@@ -13,7 +13,7 @@ const STORAGE_KEY = "mlx-stockengine-v1";
 // to "un-hide" a child of a display:none parent. Nesting the print content
 // anywhere inside app-shell therefore guarantees it prints blank. Portaling
 // it out to a body-level sibling sidesteps that entirely.
-function PrintPortal({ children }) {
+function PrintPortal({ children, domRef }) {
   const nodeRef = useRef(null);
   if (!nodeRef.current) {
     nodeRef.current = document.createElement("div");
@@ -22,8 +22,10 @@ function PrintPortal({ children }) {
   useEffect(() => {
     const node = nodeRef.current;
     document.body.appendChild(node);
+    if (domRef) domRef.current = node;
     return () => {
       document.body.removeChild(node);
+      if (domRef) domRef.current = null;
     };
   }, []);
   return createPortal(children, nodeRef.current);
@@ -1749,27 +1751,34 @@ function partyCode(data, id) {
 
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
-  const [printMode, setPrintMode] = useState(null); // "rented" | "depot" | "pending" | null
+  // portalRefs hold direct references to each portal's body-level DOM node,
+  // set via the domRef prop on PrintPortal. triggerPrint uses them to
+  // show/hide the right portal and call window.print() synchronously in the
+  // same click handler — no state change, no re-render, no mobile race.
+  const portalRefs = {
+    rented: useRef(null),
+    depot: useRef(null),
+    pending: useRef(null),
+  };
 
-  useEffect(() => {
-    const clear = () => setPrintMode(null);
-    window.addEventListener("afterprint", clear);
-    return () => window.removeEventListener("afterprint", clear);
-  }, []);
-
-  // Portals are always mounted (not conditional on printMode) so their DOM
-  // nodes already exist when triggerPrint runs — no re-render race on mobile.
   const triggerPrint = (mode) => {
-    setPrintMode(mode);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
-        el.style.maxHeight = "none";
-        el.style.overflow = "visible";
-        el.style.overflowX = "visible";
-        el.style.overflowY = "visible";
-      });
-      window.print();
-    }));
+    const node = portalRefs[mode]?.current;
+    if (!node) return;
+    // Make all portal nodes invisible to print except the chosen one.
+    Object.entries(portalRefs).forEach(([key, ref]) => {
+      if (ref.current) ref.current.style.display = key === mode ? "block" : "none";
+    });
+    node.querySelectorAll(".table-wrap").forEach((el) => {
+      el.style.maxHeight = "none";
+      el.style.overflow = "visible";
+      el.style.overflowX = "visible";
+      el.style.overflowY = "visible";
+    });
+    window.print();
+    // Restore after dialog closes.
+    Object.values(portalRefs).forEach((ref) => {
+      if (ref.current) ref.current.style.display = "";
+    });
   };
 
   // Unfiltered — used for depot math, which must always reflect every party.
@@ -1865,7 +1874,7 @@ function Dashboard({ data }) {
                 </button>
               </div>
               {rentedContent}
-              <PrintPortal>{printMode === "rented" ? rentedContent : null}</PrintPortal>
+              <PrintPortal domRef={portalRefs.rented}>{rentedContent}</PrintPortal>
             </div>
           );
         })()}
@@ -1904,7 +1913,7 @@ function Dashboard({ data }) {
                 </button>
               </div>
               {depotContent}
-              <PrintPortal>{printMode === "depot" ? depotContent : null}</PrintPortal>
+              <PrintPortal domRef={portalRefs.depot}>{depotContent}</PrintPortal>
             </div>
           );
         })()}
@@ -1947,7 +1956,7 @@ function Dashboard({ data }) {
               </button>
             </div>
             {pendingContent}
-            <PrintPortal>{printMode === "pending" ? pendingContent : null}</PrintPortal>
+            <PrintPortal domRef={portalRefs.pending}>{pendingContent}</PrintPortal>
           </div>
         );
       })()}
@@ -3251,34 +3260,35 @@ const emptyPaymentForm = () => ({
 
 function PartyLedger({ data, persist }) {
   const [partyId, setPartyId] = useState("");
-  const [printMode, setPrintMode] = useState(null); // "rented" | "timeline" | null
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
   const party = data.parties.find((p) => p.id === partyId);
-  useEffect(() => {
-    const clear = () => setPrintMode(null);
-    window.addEventListener("afterprint", clear);
-    return () => window.removeEventListener("afterprint", clear);
-  }, []);
+  const portalRefs = {
+    rented: useRef(null),
+    timeline: useRef(null),
+  };
 
   // reset the payment form whenever the selected party changes
   useEffect(() => {
     setPaymentForm(emptyPaymentForm());
   }, [partyId]);
 
-  // Portals are always mounted so their DOM nodes exist before triggerPrint
-  // runs — eliminates the re-render race that caused blank prints on mobile.
   const triggerPrint = (mode) => {
-    setPrintMode(mode);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
-        el.style.maxHeight = "none";
-        el.style.overflow = "visible";
-        el.style.overflowX = "visible";
-        el.style.overflowY = "visible";
-      });
-      window.print();
-    }));
+    const node = portalRefs[mode]?.current;
+    if (!node) return;
+    Object.entries(portalRefs).forEach(([key, ref]) => {
+      if (ref.current) ref.current.style.display = key === mode ? "block" : "none";
+    });
+    node.querySelectorAll(".table-wrap").forEach((el) => {
+      el.style.maxHeight = "none";
+      el.style.overflow = "visible";
+      el.style.overflowX = "visible";
+      el.style.overflowY = "visible";
+    });
+    window.print();
+    Object.values(portalRefs).forEach((ref) => {
+      if (ref.current) ref.current.style.display = "";
+    });
   };
 
   const canSavePayment = partyId && Number(paymentForm.amount) > 0;
@@ -3503,7 +3513,7 @@ function PartyLedger({ data, persist }) {
                   </button>
                 </div>
                 {rentedContent}
-                <PrintPortal>{printMode === "rented" ? rentedContent : null}</PrintPortal>
+                <PrintPortal domRef={portalRefs.rented}>{rentedContent}</PrintPortal>
               </div>
             );
           })()}
@@ -3545,7 +3555,7 @@ function PartyLedger({ data, persist }) {
                   </button>
                 </div>
                 {timelineContent}
-                <PrintPortal>{printMode === "timeline" ? timelineContent : null}</PrintPortal>
+                <PrintPortal domRef={portalRefs.timeline}>{timelineContent}</PrintPortal>
               </div>
             );
           })()}
