@@ -1751,6 +1751,9 @@ function partyCode(data, id) {
 
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
+  const [viewRented, setViewRented] = useState(false);
+  const [viewDepot, setViewDepot] = useState(false);
+  const [viewPending, setViewPending] = useState(false);
 
   // Each portal carries a permanent unique class. triggerPrint sets a
   // data-print attribute on <body> so CSS shows only that portal, then
@@ -1854,12 +1857,23 @@ function Dashboard({ data }) {
           );
           return (
             <div>
-              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
-                  <Printer size={13} /> Print / Save PDF
-                </button>
+              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                {!viewRented ? (
+                  <button style={styles.ghostBtn} onClick={() => setViewRented(true)}>
+                    <Printer size={13} /> View
+                  </button>
+                ) : (
+                  <>
+                    <button style={styles.ghostBtn} onClick={() => setViewRented(false)}>
+                      <X size={13} /> Close
+                    </button>
+                    <button style={styles.primaryBtn} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
+                      <Printer size={13} /> Print / Save PDF
+                    </button>
+                  </>
+                )}
               </div>
-              {rentedContent}
+              {viewRented && rentedContent}
               <PrintPortal extraClass="print-portal--dashboard-rented">{rentedContent}</PrintPortal>
             </div>
           );
@@ -1893,12 +1907,23 @@ function Dashboard({ data }) {
           );
           return (
             <div>
-              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
-                  <Printer size={13} /> Print / Save PDF
-                </button>
+              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                {!viewDepot ? (
+                  <button style={styles.ghostBtn} onClick={() => setViewDepot(true)}>
+                    <Printer size={13} /> View
+                  </button>
+                ) : (
+                  <>
+                    <button style={styles.ghostBtn} onClick={() => setViewDepot(false)}>
+                      <X size={13} /> Close
+                    </button>
+                    <button style={styles.primaryBtn} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
+                      <Printer size={13} /> Print / Save PDF
+                    </button>
+                  </>
+                )}
               </div>
-              {depotContent}
+              {viewDepot && depotContent}
               <PrintPortal extraClass="print-portal--dashboard-depot">{depotContent}</PrintPortal>
             </div>
           );
@@ -3249,6 +3274,8 @@ function PartyLedger({ data, persist }) {
   const [partyId, setPartyId] = useState("");
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
+  const [viewLedgerRented, setViewLedgerRented] = useState(false);
+  const [viewLedgerTimeline, setViewLedgerTimeline] = useState(false);
   const party = data.parties.find((p) => p.id === partyId);
 
   // reset the payment form whenever the selected party changes
@@ -3484,12 +3511,23 @@ function PartyLedger({ data, persist }) {
             );
             return (
               <div>
-                <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
-                    <Printer size={15} /> Print / Save PDF
-                  </button>
+                <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
+                  {!viewLedgerRented ? (
+                    <button style={styles.ghostBtn} onClick={() => setViewLedgerRented(true)}>
+                      <Printer size={15} /> View
+                    </button>
+                  ) : (
+                    <>
+                      <button style={styles.ghostBtn} onClick={() => setViewLedgerRented(false)}>
+                        <X size={13} /> Close
+                      </button>
+                      <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
+                        <Printer size={15} /> Print / Save PDF
+                      </button>
+                    </>
+                  )}
                 </div>
-                {rentedContent}
+                {viewLedgerRented && rentedContent}
                 <PrintPortal extraClass="print-portal--ledger-rented">{rentedContent}</PrintPortal>
               </div>
             );
@@ -3526,12 +3564,23 @@ function PartyLedger({ data, persist }) {
             );
             return (
               <div>
-                <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
-                    <Printer size={15} /> Print / Save PDF
-                  </button>
+                <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
+                  {!viewLedgerTimeline ? (
+                    <button style={styles.ghostBtn} onClick={() => setViewLedgerTimeline(true)}>
+                      <Printer size={15} /> View
+                    </button>
+                  ) : (
+                    <>
+                      <button style={styles.ghostBtn} onClick={() => setViewLedgerTimeline(false)}>
+                        <X size={13} /> Close
+                      </button>
+                      <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
+                        <Printer size={15} /> Print / Save PDF
+                      </button>
+                    </>
+                  )}
                 </div>
-                {timelineContent}
+                {viewLedgerTimeline && timelineContent}
                 <PrintPortal extraClass="print-portal--ledger-timeline">{timelineContent}</PrintPortal>
               </div>
             );
