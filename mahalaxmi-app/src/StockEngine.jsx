@@ -1764,15 +1764,9 @@ function Dashboard({ data }) {
   const triggerPrint = (mode) => {
     const node = portalRefs[mode]?.current;
     if (!node) return;
-    // Add "print-portal--active" class only to the chosen portal.
-    // We use a CSS class (not inline display) so that the @media print rule
-    // `.print-portal--active { display: block !important }` wins over the
-    // base `.print-portal { display: none }` — inline styles can't reliably
-    // beat !important on mobile browsers.
+    // Toggle the active class — only the chosen portal gets shown in print.
     Object.entries(portalRefs).forEach(([key, ref]) => {
-      if (ref.current) {
-        ref.current.classList.toggle("print-portal--active", key === mode);
-      }
+      if (ref.current) ref.current.classList.toggle("print-portal--active", key === mode);
     });
     node.querySelectorAll(".table-wrap").forEach((el) => {
       el.style.maxHeight = "none";
@@ -1780,8 +1774,12 @@ function Dashboard({ data }) {
       el.style.overflowX = "visible";
       el.style.overflowY = "visible";
     });
+    // Force a synchronous reflow so the browser flushes the class change
+    // before window.print() is called — without this, mobile browsers print
+    // the stale (all-hidden) layout and produce a blank page.
+    void node.offsetHeight;
     window.print();
-    // Remove active class after print dialog closes.
+    // Clean up after the print dialog closes.
     Object.values(portalRefs).forEach((ref) => {
       if (ref.current) ref.current.classList.remove("print-portal--active");
     });
@@ -3165,6 +3163,8 @@ function InvoicePrintView({ data, invoice }) {
         el.style.overflowX = "visible";
         el.style.overflowY = "visible";
       });
+      // Force reflow so mobile browser sees the class change before printing.
+      void portalRef.current.offsetHeight;
     }
     window.print();
     document.title = prevTitle;
@@ -3289,8 +3289,6 @@ function PartyLedger({ data, persist }) {
   const triggerPrint = (mode) => {
     const node = portalRefs[mode]?.current;
     if (!node) return;
-    // Use CSS class (not inline style) so the @media print !important rule
-    // only shows the chosen portal — inline style loses to !important on mobile.
     Object.entries(portalRefs).forEach(([key, ref]) => {
       if (ref.current) ref.current.classList.toggle("print-portal--active", key === mode);
     });
@@ -3300,6 +3298,8 @@ function PartyLedger({ data, persist }) {
       el.style.overflowX = "visible";
       el.style.overflowY = "visible";
     });
+    // Force synchronous reflow before printing — prevents blank page on mobile.
+    void node.offsetHeight;
     window.print();
     Object.values(portalRefs).forEach((ref) => {
       if (ref.current) ref.current.classList.remove("print-portal--active");
