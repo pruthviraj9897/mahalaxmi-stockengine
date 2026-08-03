@@ -53,6 +53,15 @@ function MobilePrintOverlay({ children, onClose }) {
         wrapRef.current.style.overflow = "visible";
         wrapRef.current.style.zIndex = "auto";
         wrapRef.current.style.height = "auto";
+
+        // table-wrap uses inline styles (maxHeight: 460, overflowY: auto) which
+        // beat @media print CSS even with !important. Override them directly in JS.
+        wrapRef.current.querySelectorAll(".table-wrap").forEach((el) => {
+          el.style.maxHeight = "none";
+          el.style.overflow = "visible";
+          el.style.overflowX = "visible";
+          el.style.overflowY = "visible";
+        });
       }
       // Also hide app-shell so only our content appears
       const shell = document.querySelector(".app-shell");
