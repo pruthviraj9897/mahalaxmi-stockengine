@@ -1764,9 +1764,15 @@ function Dashboard({ data }) {
   const triggerPrint = (mode) => {
     const node = portalRefs[mode]?.current;
     if (!node) return;
-    // Make all portal nodes invisible to print except the chosen one.
+    // Add "print-portal--active" class only to the chosen portal.
+    // We use a CSS class (not inline display) so that the @media print rule
+    // `.print-portal--active { display: block !important }` wins over the
+    // base `.print-portal { display: none }` — inline styles can't reliably
+    // beat !important on mobile browsers.
     Object.entries(portalRefs).forEach(([key, ref]) => {
-      if (ref.current) ref.current.style.display = key === mode ? "block" : "none";
+      if (ref.current) {
+        ref.current.classList.toggle("print-portal--active", key === mode);
+      }
     });
     node.querySelectorAll(".table-wrap").forEach((el) => {
       el.style.maxHeight = "none";
@@ -1775,9 +1781,9 @@ function Dashboard({ data }) {
       el.style.overflowY = "visible";
     });
     window.print();
-    // Restore after dialog closes.
+    // Remove active class after print dialog closes.
     Object.values(portalRefs).forEach((ref) => {
-      if (ref.current) ref.current.style.display = "";
+      if (ref.current) ref.current.classList.remove("print-portal--active");
     });
   };
 
@@ -3141,6 +3147,7 @@ function InvoiceArchive({ data, persist }) {
 
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
+  const portalRef = useRef(null);
 
   const handlePrint = () => {
     const party = data.parties.find((p) => p.id === invoice.partyId);
@@ -3148,14 +3155,20 @@ function InvoicePrintView({ data, invoice }) {
     const dateLabel = invoice.billStart && invoice.billEnd ? `${fmtDateDisplay(invoice.billStart)} - ${fmtDateDisplay(invoice.billEnd)}` : "";
     const prevTitle = document.title;
     document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
-    document.querySelectorAll(".print-portal .table-wrap").forEach((el) => {
-      el.style.maxHeight = "none";
-      el.style.overflow = "visible";
-      el.style.overflowX = "visible";
-      el.style.overflowY = "visible";
-    });
+    // Mark this portal as active; hide all other portals so only this one prints.
+    document.querySelectorAll(".print-portal").forEach((el) => el.classList.remove("print-portal--active"));
+    if (portalRef.current) {
+      portalRef.current.classList.add("print-portal--active");
+      portalRef.current.querySelectorAll(".table-wrap").forEach((el) => {
+        el.style.maxHeight = "none";
+        el.style.overflow = "visible";
+        el.style.overflowX = "visible";
+        el.style.overflowY = "visible";
+      });
+    }
     window.print();
     document.title = prevTitle;
+    if (portalRef.current) portalRef.current.classList.remove("print-portal--active");
   };
 
   const sheet = (
@@ -3244,7 +3257,7 @@ function InvoicePrintView({ data, invoice }) {
         </button>
       </div>
       {sheet}
-      <PrintPortal>{sheet}</PrintPortal>
+      <PrintPortal domRef={portalRef}>{sheet}</PrintPortal>
     </Panel>
   );
 }
@@ -3276,8 +3289,10 @@ function PartyLedger({ data, persist }) {
   const triggerPrint = (mode) => {
     const node = portalRefs[mode]?.current;
     if (!node) return;
+    // Use CSS class (not inline style) so the @media print !important rule
+    // only shows the chosen portal — inline style loses to !important on mobile.
     Object.entries(portalRefs).forEach(([key, ref]) => {
-      if (ref.current) ref.current.style.display = key === mode ? "block" : "none";
+      if (ref.current) ref.current.classList.toggle("print-portal--active", key === mode);
     });
     node.querySelectorAll(".table-wrap").forEach((el) => {
       el.style.maxHeight = "none";
@@ -3287,7 +3302,7 @@ function PartyLedger({ data, persist }) {
     });
     window.print();
     Object.values(portalRefs).forEach((ref) => {
-      if (ref.current) ref.current.style.display = "";
+      if (ref.current) ref.current.classList.remove("print-portal--active");
     });
   };
 
@@ -4131,7 +4146,11 @@ const globalCss = `
     @page { size: A4; margin: 10mm; }
     html, body { width: 100%; height: auto; background: #fff !important; }
     .app-shell { display: none !important; }
-    .print-portal { display: block !important; padding: 10mm; box-sizing: border-box; }
+    /* Only the portal that was explicitly activated gets shown — all others
+       stay hidden. Using a class (not inline style) beats the !important on
+       the base rule and works correctly on mobile Safari / Chrome. */
+    .print-portal { display: none !important; }
+    .print-portal--active { display: block !important; padding: 10mm; box-sizing: border-box; }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
     .table-wrap table { width: 100%; }
