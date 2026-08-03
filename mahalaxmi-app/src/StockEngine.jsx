@@ -56,23 +56,22 @@ function MobilePrintOverlay({ children, onClose }) {
       fontFamily: "Georgia, 'Iowan Old Style', serif",
       color: "#241c14",
     }}>
-      {/* Close bar — hidden when actually printing */}
-      <div className="mobile-print-close-bar" style={{
-        position: "sticky", top: 0, background: "#241c14", color: "#efe6d8",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "10px 16px", zIndex: 1, gap: 12,
-      }}>
-        <span style={{ fontSize: 13, fontFamily: "system-ui, sans-serif" }}>
-          Tap your browser's <strong>Share → Print / Save as PDF</strong>
-        </span>
-        <button onClick={onClose} style={{
-          background: "transparent", border: "1px solid #efe6d8", color: "#efe6d8",
-          borderRadius: 6, padding: "5px 12px", fontSize: 13, cursor: "pointer",
-          fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", gap: 6,
-        }}>
-          ✕ Close
-        </button>
-      </div>
+      {/* Floating close button — hidden when actually printing */}
+      <button
+        className="mobile-print-close-bar"
+        onClick={onClose}
+        style={{
+          position: "fixed", top: 12, right: 12, zIndex: 10000,
+          background: "#241c14", color: "#efe6d8",
+          border: "none", borderRadius: "50%",
+          width: 36, height: 36, fontSize: 18, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+        }}
+        aria-label="Close"
+      >
+        ✕
+      </button>
       <div style={{ padding: "16px 14px" }}>
         {children}
       </div>
