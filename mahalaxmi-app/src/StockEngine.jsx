@@ -2538,12 +2538,36 @@ function ReturnEntry({ data, persist }) {
 
 /* ---------------- Invoice Builder ---------------- */
 
+// An empty manual line (for "Add row" in editable invoice preview)
+const emptyInvoiceLine = () => ({
+  itemName: "",
+  qty: "",
+  rate: "",
+  feet: "",
+  start: "",
+  end: "",
+  days: "",
+  amount: "",
+  returned: false,
+  broken: false,
+  service: false,
+  _manual: true,
+});
+
 function InvoiceBuilder({ data, persist }) {
   const [partyId, setPartyId] = useState("");
   const [billStart, setBillStart] = useState("");
   const [billEnd, setBillEnd] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [invoiceNoInput, setInvoiceNoInput] = useState(String(data.seq.invoice));
+
+  // Editable lines state — seeded from computed result, then user can tweak
+  const [editableLines, setEditableLines] = useState(null); // null = use computed
+  const [editMode, setEditMode] = useState(false);
+
+  // Extra adjustments: transport override and deposit override
+  const [transportOverride, setTransportOverride] = useState("");
+  const [depositOverride, setDepositOverride] = useState("");
 
   const party = data.parties.find((p) => p.id === partyId) || null;
 
@@ -2552,24 +2576,83 @@ function InvoiceBuilder({ data, persist }) {
     return computeInvoiceLines(data, partyId, billStart, billEnd);
   }, [data, partyId, billStart, billEnd]);
 
+  // Seed editableLines whenever result changes (new party/dates), but only if not in edit mode
+  useEffect(() => {
+    if (result && !editMode) {
+      setEditableLines(result.lines.map((l) => ({ ...l, qty: String(l.qty), rate: String(l.rate), days: String(l.days), amount: String(l.amount), feet: l.feet ? String(l.feet) : "" })));
+      setTransportOverride("");
+      setDepositOverride("");
+    }
+    if (!result) {
+      setEditableLines(null);
+      setEditMode(false);
+    }
+  }, [result]);
+
+  // Recomputed totals from editable lines
+  const editedTotals = useMemo(() => {
+    if (!editableLines || !result) return null;
+    const itemRentTotal = round2(editableLines.reduce((s, l) => s + (Number(l.amount) || 0), 0));
+    const transportTotal = transportOverride !== "" ? (Number(transportOverride) || 0) : result.transportTotal;
+    const depositTotal = depositOverride !== "" ? (Number(depositOverride) || 0) : result.depositTotal;
+    const additionalCharges = transportTotal;
+    const taxable = round2(itemRentTotal + additionalCharges);
+    const netTotal = round2(taxable - depositTotal);
+    return { itemRentTotal, transportTotal, depositTotal, netTotal, taxable };
+  }, [editableLines, result, transportOverride, depositOverride]);
+
   const gst = useMemo(() => {
     if (!result) return null;
-    return computeGst(party, result.itemRentTotal + result.additionalCharges);
-  }, [result, party]);
+    const base = editMode && editedTotals ? editedTotals.taxable : (result.itemRentTotal + result.additionalCharges);
+    return computeGst(party, base);
+  }, [result, party, editMode, editedTotals]);
 
-  const finalTotal = result && gst ? round2(gst.grandTotal - result.depositTotal) : null;
+  const finalTotal = useMemo(() => {
+    if (!result || !gst) return null;
+    const dep = editMode && editedTotals ? editedTotals.depositTotal : result.depositTotal;
+    return round2(gst.grandTotal - dep);
+  }, [result, gst, editMode, editedTotals]);
 
   const duplicateInvoiceNo = data.invoices.some((inv) => inv.invoiceNo === Number(invoiceNoInput));
 
+  const activeLinesForSave = editMode && editableLines
+    ? editableLines.filter((l) => l.itemName && (Number(l.amount) !== 0 || Number(l.qty) > 0))
+    : (result ? result.lines : []);
+
   const save = () => {
-    if (!result || result.lines.length === 0) return;
+    if (!result || activeLinesForSave.length === 0) return;
     const invoiceNo = Number(invoiceNoInput) || data.seq.invoice;
     const now = new Date().toISOString();
+
+    // Build the saved result — use edited values if in edit mode
+    let savedResult;
+    if (editMode && editedTotals) {
+      const cleanLines = activeLinesForSave.map((l) => ({
+        ...l,
+        qty: Number(l.qty) || 0,
+        rate: Number(l.rate) || 0,
+        days: Number(l.days) || 0,
+        amount: Number(l.amount) || 0,
+        feet: l.feet ? Number(l.feet) : undefined,
+      }));
+      savedResult = {
+        ...result,
+        lines: cleanLines,
+        itemRentTotal: editedTotals.itemRentTotal,
+        transportTotal: editedTotals.transportTotal,
+        depositTotal: editedTotals.depositTotal,
+        additionalCharges: editedTotals.additionalCharges,
+        netTotal: editedTotals.netTotal,
+      };
+    } else {
+      savedResult = result;
+    }
+
     const next = {
       ...data,
       invoices: [
         ...data.invoices,
-        { id: crypto.randomUUID(), invoiceNo, partyId, billStart, billEnd, invoiceDate, ...result, gst, finalTotal, createdAt: now, updatedAt: now },
+        { id: crypto.randomUUID(), invoiceNo, partyId, billStart, billEnd, invoiceDate, ...savedResult, gst, finalTotal, createdAt: now, updatedAt: now },
       ],
       seq: { ...data.seq, invoice: Math.max(data.seq.invoice, invoiceNo) + 1 },
     };
@@ -2577,8 +2660,53 @@ function InvoiceBuilder({ data, persist }) {
     setPartyId("");
     setBillStart("");
     setBillEnd("");
+    setEditMode(false);
+    setEditableLines(null);
+    setTransportOverride("");
+    setDepositOverride("");
     setInvoiceNoInput(String(next.seq.invoice));
   };
+
+  const enterEditMode = () => {
+    if (result && !editMode) {
+      setEditableLines(result.lines.map((l) => ({ ...l, qty: String(l.qty), rate: String(l.rate), days: String(l.days), amount: String(l.amount.toFixed(2)), feet: l.feet ? String(l.feet) : "" })));
+    }
+    setEditMode(true);
+  };
+
+  const exitEditMode = () => {
+    setEditMode(false);
+    if (result) {
+      setEditableLines(result.lines.map((l) => ({ ...l, qty: String(l.qty), rate: String(l.rate), days: String(l.days), amount: String(l.amount.toFixed(2)), feet: l.feet ? String(l.feet) : "" })));
+    }
+    setTransportOverride("");
+    setDepositOverride("");
+  };
+
+  const setEditLine = (idx, patch) => {
+    setEditableLines((prev) => prev.map((l, i) => {
+      if (i !== idx) return l;
+      const updated = { ...l, ...patch };
+      // Auto-recalculate amount if qty/rate/days change and amount not being directly edited
+      if (!("amount" in patch) && ("qty" in patch || "rate" in patch || "days" in patch)) {
+        const qty = Number(updated.qty) || 0;
+        const rate = Number(updated.rate) || 0;
+        const days = Number(updated.days) || 0;
+        const feet = Number(updated.feet) || 0;
+        updated.amount = String(round2(qty * rate * days * (feet || 1)));
+      }
+      return updated;
+    }));
+  };
+
+  const addEditLine = () => setEditableLines((prev) => [...prev, emptyInvoiceLine()]);
+  const removeEditLine = (idx) => setEditableLines((prev) => prev.filter((_, i) => i !== idx));
+
+  const displayLines = editMode ? editableLines : (result ? result.lines : []);
+  const displayTransport = editMode && transportOverride !== "" ? Number(transportOverride) : (result ? result.transportTotal : 0);
+  const displayDeposit = editMode && depositOverride !== "" ? Number(depositOverride) : (result ? result.depositTotal : 0);
+  const displayItemRent = editMode && editedTotals ? editedTotals.itemRentTotal : (result ? result.itemRentTotal : 0);
+  const displayNetTotal = editMode && editedTotals ? editedTotals.netTotal : (result ? result.netTotal : 0);
 
   return (
     <div>
@@ -2601,32 +2729,146 @@ function InvoiceBuilder({ data, persist }) {
       </Panel>
 
       {result && (
-        result.lines.length === 0 ? (
+        result.lines.length === 0 && !editMode ? (
           <Panel title="Preview"><Empty text="No billable lines for this party in this window — check the dates or that deliveries exist." /></Panel>
         ) : (
           <>
-            <Panel title={`Preview — ${result.lines.length} line${result.lines.length > 1 ? "s" : ""}`} hint={result.lines.length > 15 ? "Over 15 lines — will print as a continuation invoice" : undefined}>
-              <Table
-                cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
-                rows={result.lines.map((l, i) => [
-                  i + 1,
-                  <span>{l.itemName} {l.returned && <em style={styles.tinyTag}>returned</em>} {l.broken && <em style={styles.tinyTag}>broken</em>} {l.service && <em style={styles.tinyTag}>service</em>}</span>,
-                  l.qty,
-                  l.feet ? `${l.rate} × ${l.feet}ft` : l.rate,
-                  l.start,
-                  l.end,
-                  l.days,
-                  l.amount.toFixed(2),
-                ])}
-              />
+            <Panel
+              title={editMode ? `Editing Invoice — ${(editableLines || []).length} line${(editableLines || []).length !== 1 ? "s" : ""}` : `Preview — ${result.lines.length} line${result.lines.length > 1 ? "s" : ""}`}
+              hint={!editMode && result.lines.length > 15 ? "Over 15 lines — will print as a continuation invoice" : editMode ? "You are in manual edit mode — changes override the auto-calculated values" : undefined}
+            >
+              {/* Edit mode toggle bar */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
+                {!editMode ? (
+                  <button style={styles.ghostBtn} onClick={enterEditMode}><Pencil size={13} /> Manually Edit Lines</button>
+                ) : (
+                  <>
+                    <span style={{ ...styles.tinyTag, background: "#fff3cd", color: "#856404", padding: "3px 8px", fontSize: 11.5 }}>✏️ Edit Mode</span>
+                    <button style={styles.ghostBtn} onClick={exitEditMode}><X size={13} /> Reset to Auto-Calculated</button>
+                  </>
+                )}
+              </div>
+
+              {/* Line table — read-only or editable */}
+              {!editMode ? (
+                <Table
+                  cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
+                  rows={result.lines.map((l, i) => [
+                    i + 1,
+                    <span>{l.itemName} {l.returned && <em style={styles.tinyTag}>returned</em>} {l.broken && <em style={styles.tinyTag}>broken</em>} {l.service && <em style={styles.tinyTag}>service</em>}</span>,
+                    l.qty,
+                    l.feet ? `${l.rate} × ${l.feet}ft` : l.rate,
+                    fmtDateDisplay(l.start),
+                    fmtDateDisplay(l.end),
+                    l.days,
+                    l.amount.toFixed(2),
+                  ])}
+                />
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  {/* Editable header */}
+                  <div style={{ ...styles.lineHeaderRow, gap: 6 }}>
+                    <span style={{ width: 24, flexShrink: 0 }}>#</span>
+                    <span style={{ flex: 3, minWidth: 110 }}>Item Name</span>
+                    <span style={{ flex: 1, minWidth: 55 }}>Qty</span>
+                    <span style={{ flex: 1, minWidth: 55 }}>Rate</span>
+                    <span style={{ flex: 1, minWidth: 55 }}>Feet</span>
+                    <span style={{ flex: 1, minWidth: 70 }}>Start</span>
+                    <span style={{ flex: 1, minWidth: 70 }}>End</span>
+                    <span style={{ flex: 1, minWidth: 50 }}>Days</span>
+                    <span style={{ flex: 1, minWidth: 75 }}>Amount (₹)</span>
+                    <span style={{ width: 32, flexShrink: 0 }} />
+                  </div>
+                  {(editableLines || []).map((l, idx) => (
+                    <div key={idx} style={{ ...styles.lineRow, gap: 6, alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ width: 24, flexShrink: 0, fontSize: 12, color: COLORS.muted }}>{idx + 1}</span>
+                      <input
+                        style={{ ...styles.input, flex: 3, minWidth: 110 }}
+                        placeholder="Item description"
+                        value={l.itemName}
+                        onChange={(e) => setEditLine(idx, { itemName: e.target.value })}
+                      />
+                      <input
+                        style={{ ...styles.input, flex: 1, minWidth: 55 }}
+                        type="number"
+                        placeholder="Qty"
+                        value={l.qty}
+                        onChange={(e) => setEditLine(idx, { qty: e.target.value })}
+                      />
+                      <input
+                        style={{ ...styles.input, flex: 1, minWidth: 55 }}
+                        type="number"
+                        placeholder="Rate"
+                        value={l.rate}
+                        onChange={(e) => setEditLine(idx, { rate: e.target.value })}
+                      />
+                      <input
+                        style={{ ...styles.input, flex: 1, minWidth: 55 }}
+                        type="number"
+                        placeholder="Ft (opt)"
+                        value={l.feet}
+                        onChange={(e) => setEditLine(idx, { feet: e.target.value })}
+                      />
+                      <input
+                        style={{ ...styles.input, flex: 1, minWidth: 70 }}
+                        type="date"
+                        value={l.start}
+                        onChange={(e) => setEditLine(idx, { start: e.target.value })}
+                      />
+                      <input
+                        style={{ ...styles.input, flex: 1, minWidth: 70 }}
+                        type="date"
+                        value={l.end}
+                        onChange={(e) => setEditLine(idx, { end: e.target.value })}
+                      />
+                      <input
+                        style={{ ...styles.input, flex: 1, minWidth: 50 }}
+                        type="number"
+                        placeholder="Days"
+                        value={l.days}
+                        onChange={(e) => setEditLine(idx, { days: e.target.value })}
+                      />
+                      <input
+                        style={{ ...styles.input, flex: 1, minWidth: 75, fontWeight: 600 }}
+                        type="number"
+                        placeholder="Amount"
+                        value={l.amount}
+                        onChange={(e) => setEditLine(idx, { amount: e.target.value })}
+                      />
+                      <button style={{ ...styles.iconBtn, flexShrink: 0 }} onClick={() => removeEditLine(idx)} title="Remove line"><Trash2 size={13} /></button>
+                    </div>
+                  ))}
+                  <button style={styles.ghostBtn} onClick={addEditLine}><Plus size={13} /> Add Row</button>
+
+                  {/* Transport & Deposit overrides */}
+                  <div style={{ marginTop: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    <Field
+                      label={`Transport Charge (auto: ₹${result.transportTotal.toFixed(2)})`}
+                      type="number"
+                      value={transportOverride}
+                      onChange={setTransportOverride}
+                      placeholder={String(result.transportTotal)}
+                    />
+                    <Field
+                      label={`Deposit Deduction (auto: ₹${result.depositTotal.toFixed(2)})`}
+                      type="number"
+                      value={depositOverride}
+                      onChange={setDepositOverride}
+                      placeholder={String(result.depositTotal)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Totals box */}
               <div style={styles.totalsBox}>
-                <TotalRow label="Item Rent Amount" value={result.itemRentTotal} />
-                {result.brokenTotal > 0 && <TotalRow label="  — of which Broken Charges" value={result.brokenTotal} />}
-                {result.serviceTotal > 0 && <TotalRow label="  — of which Service Charges" value={result.serviceTotal} />}
-                <TotalRow label="Transport Charge" value={result.transportTotal} />
+                <TotalRow label="Item Rent Amount" value={displayItemRent} />
+                {!editMode && result.brokenTotal > 0 && <TotalRow label="  — of which Broken Charges" value={result.brokenTotal} />}
+                {!editMode && result.serviceTotal > 0 && <TotalRow label="  — of which Service Charges" value={result.serviceTotal} />}
+                <TotalRow label="Transport Charge" value={displayTransport} />
                 {gst && gst.applicable ? (
                   <>
-                    <TotalRow label="Taxable Value" value={gst.taxableValue} bold />
+                    <TotalRow label="Taxable Value" value={editMode ? (editedTotals?.taxable ?? 0) : gst.taxableValue} bold />
                     {gst.gstType === "IGST" ? (
                       <TotalRow label={`IGST @ ${gst.rate}%`} value={gst.igst} />
                     ) : (
@@ -2635,13 +2877,13 @@ function InvoiceBuilder({ data, persist }) {
                         <TotalRow label={`SGST @ ${gst.rate / 2}%`} value={gst.sgst} />
                       </>
                     )}
-                    <TotalRow label="Deposit (deducted)" value={-result.depositTotal} />
+                    <TotalRow label="Deposit (deducted)" value={-displayDeposit} />
                     <TotalRow label="Grand Total (incl. GST)" value={finalTotal} big />
                   </>
                 ) : (
                   <>
-                    <TotalRow label="Deposit (deducted)" value={-result.depositTotal} />
-                    <TotalRow label="Net Total" value={result.netTotal} big />
+                    <TotalRow label="Deposit (deducted)" value={-displayDeposit} />
+                    <TotalRow label="Net Total" value={displayNetTotal} big />
                   </>
                 )}
               </div>
