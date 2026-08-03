@@ -1269,18 +1269,17 @@ export default function StockEngine({ session, onLogout }) {
     link.href = href;
   }, []);
 
-  // Prevent the Enter key from accidentally triggering Save/Add buttons
-  // while the user is typing in any input or select field.
+  // Prevent the Enter key from triggering any Save/Add/Submit action.
+  // Blocks Enter on inputs (stops form-submit behaviour) AND on buttons
+  // (stops keyboard-click on a focused button). Users must click buttons
+  // explicitly with the mouse or tap.
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key !== "Enter") return;
-      const tag = e.target.tagName;
-      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
-        e.preventDefault();
-      }
+      e.preventDefault();
     };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true); // capture phase
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, []);
 
   useEffect(() => {
