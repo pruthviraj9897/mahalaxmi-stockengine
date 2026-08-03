@@ -3036,6 +3036,16 @@ function InvoiceArchive({ data, persist }) {
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
 
+  const handlePrint = () => {
+    const party = data.parties.find((p) => p.id === invoice.partyId);
+    const partyLabel = party ? party.name : "Invoice";
+    const dateLabel = invoice.invoiceDate ? fmtDateDisplay(invoice.invoiceDate) : "";
+    const prevTitle = document.title;
+    document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
+    window.print();
+    document.title = prevTitle;
+  };
+
   const sheet = (
     <div className="invoice-sheet" style={styles.invoiceSheet}>
           <div style={styles.invoiceLetterhead}>
@@ -3117,7 +3127,7 @@ function InvoicePrintView({ data, invoice }) {
   return (
     <Panel title={`Invoice #${invoice.invoiceNo}`}>
       <div className="no-print" style={{ marginBottom: 14 }}>
-        <button style={styles.primaryBtn} onClick={() => window.print()}>
+        <button style={styles.primaryBtn} onClick={handlePrint}>
           <Printer size={15} /> Print / Save PDF
         </button>
       </div>
