@@ -3039,7 +3039,7 @@ function InvoicePrintView({ data, invoice }) {
   const handlePrint = () => {
     const party = data.parties.find((p) => p.id === invoice.partyId);
     const partyLabel = party ? party.name : "Invoice";
-    const dateLabel = invoice.invoiceDate ? fmtDateDisplay(invoice.invoiceDate) : "";
+    const dateLabel = invoice.billStart && invoice.billEnd ? `${fmtDateDisplay(invoice.billStart)} - ${fmtDateDisplay(invoice.billEnd)}` : "";
     const prevTitle = document.title;
     document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
     window.print();
