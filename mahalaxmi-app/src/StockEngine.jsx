@@ -38,73 +38,56 @@ function isMobileDevice() {
     (typeof window !== "undefined" && window.innerWidth <= 768);
 }
 
-// Full-screen white overlay shown on mobile when the user taps "Print / Save PDF".
-// Before calling window.print(), we collapse the overlay wrapper to position:static
-// so mobile browsers (iOS Safari, Android Chrome) can see and print the content —
-// fixed/overflow containers are often excluded from mobile print rendering entirely.
+// Mobile print: portals content to a plain body-level div (same as PrintPortal),
+// forcibly resets all overflowing containers via JS, calls window.print(), then
+// tears down. No fixed/overflow wrappers — nothing to fight during print.
 function MobilePrintOverlay({ children, onClose }) {
-  const wrapRef = useRef(null);
+  const nodeRef = useRef(null);
+  if (!nodeRef.current) {
+    nodeRef.current = document.createElement("div");
+    nodeRef.current.className = "print-portal"; // reuse existing print-portal CSS
+  }
 
   useEffect(() => {
-    const handleBeforePrint = () => {
-      if (wrapRef.current) {
-        // Collapse to normal flow so the content is in the print document
-        wrapRef.current.style.position = "static";
-        wrapRef.current.style.overflow = "visible";
-        wrapRef.current.style.zIndex = "auto";
-        wrapRef.current.style.height = "auto";
+    const node = nodeRef.current;
+    document.body.appendChild(node);
 
-        // table-wrap uses inline styles (maxHeight: 460, overflowY: auto) which
-        // beat @media print CSS even with !important. Override them directly in JS.
-        wrapRef.current.querySelectorAll(".table-wrap").forEach((el) => {
-          el.style.maxHeight = "none";
-          el.style.overflow = "visible";
-          el.style.overflowX = "visible";
-          el.style.overflowY = "visible";
-        });
-      }
-      // Also hide app-shell so only our content appears
-      const shell = document.querySelector(".app-shell");
-      if (shell) shell.style.display = "none";
+    // Fix all inline-style overflow/maxHeight constraints that @media print
+    // CSS cannot override (inline styles beat stylesheet !important on mobile).
+    const resetOverflows = () => {
+      node.querySelectorAll("*").forEach((el) => {
+        const s = el.style;
+        if (s.maxHeight && s.maxHeight !== "none") s.maxHeight = "none";
+        if (s.overflow && s.overflow !== "visible") s.overflow = "visible";
+        if (s.overflowY && s.overflowY !== "visible") s.overflowY = "visible";
+        if (s.overflowX && s.overflowX !== "visible") s.overflowX = "visible";
+        if (s.height && s.height.endsWith("px")) s.height = "auto";
+      });
     };
+
     const handleAfterPrint = () => {
-      // Restore app-shell
-      const shell = document.querySelector(".app-shell");
-      if (shell) shell.style.display = "";
       onClose();
     };
-
-    window.addEventListener("beforeprint", handleBeforePrint);
     window.addEventListener("afterprint", handleAfterPrint);
 
-    // Trigger print after two frames so the overlay is fully painted
+    // Wait for React to commit children into the portal node, then print
     const id1 = requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        resetOverflows();
         window.print();
       });
     });
 
     return () => {
       cancelAnimationFrame(id1);
-      window.removeEventListener("beforeprint", handleBeforePrint);
       window.removeEventListener("afterprint", handleAfterPrint);
+      if (document.body.contains(node)) document.body.removeChild(node);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return createPortal(
-    <div ref={wrapRef} className="mobile-print-overlay" style={{
-      position: "fixed", inset: 0, zIndex: 9999,
-      background: "#fff", overflowY: "auto",
-      fontFamily: "Georgia, 'Iowan Old Style', serif",
-      color: "#241c14",
-    }}>
-      <div style={{ padding: "16px 14px" }}>
-        {children}
-      </div>
-    </div>,
-    document.body
-  );
+  return createPortal(children, nodeRef.current);
 }
+
 
 // Dates are always stored as YYYY-MM-DD internally (required by <input type="date">).
 // This only changes how they're shown on screen, e.g. in tables.
@@ -4228,20 +4211,6 @@ const globalCss = `
     html, body { width: 100%; height: auto; background: #fff !important; }
     .app-shell { display: none !important; }
     .print-portal { display: block !important; padding: 10mm; box-sizing: border-box; }
-    /* Mobile overlay: collapsed to static flow by beforeprint JS handler above,
-       so its children are visible to the print engine */
-    .mobile-print-overlay {
-      position: static !important;
-      overflow: visible !important;
-      height: auto !important;
-      width: 100% !important;
-      z-index: auto !important;
-      background: #fff !important;
-      box-sizing: border-box !important;
-    }
-    .mobile-print-overlay > div {
-      padding: 0 !important;
-    }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
     .table-wrap table { width: 100%; }
