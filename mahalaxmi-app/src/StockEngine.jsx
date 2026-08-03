@@ -31,7 +31,29 @@ function PrintPortal({ children, domRef, extraClass }) {
   return createPortal(children, nodeRef.current);
 }
 
-
+// Schedules `cleanup` to run once printing has actually finished, instead of
+// guessing with a fixed delay. Desktop fires `afterprint` reliably. iOS
+// Safari often skips `afterprint`, but reliably fires `focus` on the window
+// when the native print/share sheet closes — so we listen for both and run
+// on whichever comes first. The 60s timeout is a last-resort safety net for
+// the rare browser that fires neither; it should practically never trigger.
+// Cleanup NEVER runs on a fixed short delay after window.print() — that
+// guess is what caused blank print pages on mobile (content got hidden
+// again before the browser had actually painted/captured the print view).
+function schedulePrintCleanup(cleanup) {
+  let done = false;
+  const run = () => {
+    if (done) return;
+    done = true;
+    cleanup();
+    window.removeEventListener("afterprint", run);
+    window.removeEventListener("focus", run);
+    clearTimeout(fallback);
+  };
+  window.addEventListener("afterprint", run);
+  window.addEventListener("focus", run);
+  const fallback = setTimeout(run, 60000);
+}
 
 // Dates are always stored as YYYY-MM-DD internally (required by <input type="date">).
 // This only changes how they're shown on screen, e.g. in tables.
@@ -1758,11 +1780,9 @@ function Dashboard({ data }) {
   //
   // IMPORTANT: window.print() is blocking on desktop (script pauses until
   // the dialog closes) but NON-blocking on mobile Safari/Chrome (it returns
-  // immediately, before the print view has actually rendered). Removing the
-  // data-print attribute right after window.print() therefore hides the
-  // portal again before mobile has painted it — resulting in blank printed
-  // pages. Cleaning up on the `afterprint` event (which fires on both
-  // desktop and mobile once printing is actually done) fixes this.
+  // immediately, before the print view has actually rendered). Cleanup is
+  // handled by schedulePrintCleanup (see its comment above) instead of a
+  // fixed delay, which is what caused blank printed pages on mobile.
   const triggerPrint = (key, portalClass) => {
     document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
       el.style.maxHeight = "none";
@@ -1771,15 +1791,10 @@ function Dashboard({ data }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
-    const cleanup = () => {
-      document.body.removeAttribute("data-print");
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
     window.print();
-    // Fallback for browsers that never fire afterprint (rare, but seen on
-    // some mobile WebViews) — clean up a few seconds later regardless.
-    setTimeout(cleanup, 3000);
+    schedulePrintCleanup(() => {
+      document.body.removeAttribute("data-print");
+    });
   };
 
   // Unfiltered — used for depot math, which must always reflect every party.
@@ -3142,10 +3157,10 @@ function InvoiceArchive({ data, persist }) {
 
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
-  // See the matching comment in Dashboard's triggerPrint — cleanup (including
-  // restoring the title) must wait for `afterprint`, not run synchronously
-  // after window.print(), or mobile Safari/Chrome (where print() is
-  // non-blocking) prints a blank page / wrong filename.
+  // See schedulePrintCleanup's comment near the top of the file — cleanup
+  // (including restoring the title) waits for confirmed signals instead of
+  // a fixed delay, or mobile Safari/Chrome (where print() is non-blocking)
+  // can print a blank page / wrong filename on larger content like this.
   const handlePrint = () => {
     const party = data.parties.find((p) => p.id === invoice.partyId);
     const partyLabel = party ? party.name : "Invoice";
@@ -3159,14 +3174,11 @@ function InvoicePrintView({ data, invoice }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", "invoice");
-    const cleanup = () => {
+    window.print();
+    schedulePrintCleanup(() => {
       document.body.removeAttribute("data-print");
       document.title = prevTitle;
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.print();
-    setTimeout(cleanup, 3000);
+    });
   };
 
   const sheet = (
@@ -3280,9 +3292,9 @@ function PartyLedger({ data, persist }) {
     setPaymentForm(emptyPaymentForm());
   }, [partyId]);
 
-  // See the matching comment in Dashboard's triggerPrint — cleanup must wait
-  // for `afterprint`, not run synchronously after window.print(), or mobile
-  // Safari/Chrome (where print() is non-blocking) prints a blank page.
+  // See schedulePrintCleanup's comment near the top of the file — cleanup
+  // waits for confirmed signals instead of a fixed delay, or mobile
+  // Safari/Chrome (where print() is non-blocking) can print a blank page.
   const triggerPrint = (key, portalClass) => {
     document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
       el.style.maxHeight = "none";
@@ -3291,13 +3303,10 @@ function PartyLedger({ data, persist }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
-    const cleanup = () => {
-      document.body.removeAttribute("data-print");
-      window.removeEventListener("afterprint", cleanup);
-    };
-    window.addEventListener("afterprint", cleanup);
     window.print();
-    setTimeout(cleanup, 3000);
+    schedulePrintCleanup(() => {
+      document.body.removeAttribute("data-print");
+    });
   };
 
   const canSavePayment = partyId && Number(paymentForm.amount) > 0;
