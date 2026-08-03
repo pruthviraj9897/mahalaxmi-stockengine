@@ -29,6 +29,58 @@ function PrintPortal({ children }) {
   return createPortal(children, nodeRef.current);
 }
 
+// Returns true when we're on a touch-primary mobile device. Used to swap the
+// print strategy: desktop uses @media print + PrintPortal; mobile uses a
+// full-screen overlay so the user can Share → Save as PDF or screenshot it,
+// because window.print() / @media print is unreliable on iOS Safari & Android Chrome.
+function isMobileDevice() {
+  return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (typeof window !== "undefined" && window.innerWidth <= 768);
+}
+
+// Full-screen white overlay shown on mobile when the user taps "Print / Save PDF".
+// Renders the print content at full width so the user can use their browser's
+// native "Share → Save as PDF" or take a screenshot.
+function MobilePrintOverlay({ children, onClose }) {
+  // Lock body scroll while overlay is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  return createPortal(
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "#fff", overflowY: "auto",
+      fontFamily: "Georgia, 'Iowan Old Style', serif",
+      color: "#241c14",
+    }}>
+      {/* Close bar — hidden when actually printing */}
+      <div className="mobile-print-close-bar" style={{
+        position: "sticky", top: 0, background: "#241c14", color: "#efe6d8",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 16px", zIndex: 1, gap: 12,
+      }}>
+        <span style={{ fontSize: 13, fontFamily: "system-ui, sans-serif" }}>
+          Tap your browser's <strong>Share → Print / Save as PDF</strong>
+        </span>
+        <button onClick={onClose} style={{
+          background: "transparent", border: "1px solid #efe6d8", color: "#efe6d8",
+          borderRadius: 6, padding: "5px 12px", fontSize: 13, cursor: "pointer",
+          fontFamily: "system-ui, sans-serif", display: "flex", alignItems: "center", gap: 6,
+        }}>
+          ✕ Close
+        </button>
+      </div>
+      <div style={{ padding: "16px 14px" }}>
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // Dates are always stored as YYYY-MM-DD internally (required by <input type="date">).
 // This only changes how they're shown on screen, e.g. in tables.
 function fmtDateDisplay(iso) {
@@ -1748,6 +1800,7 @@ function partyCode(data, id) {
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
   const [printMode, setPrintMode] = useState(null); // "rented" | "depot" | "pending" | null
+  const [mobileOverlayMode, setMobileOverlayMode] = useState(null);
   const printRequested = useRef(false);
 
   useEffect(() => {
@@ -1759,7 +1812,13 @@ function Dashboard({ data }) {
   useEffect(() => {
     if (printMode && printRequested.current) {
       printRequested.current = false;
-      requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+      if (isMobileDevice()) {
+        // On mobile: show full-screen overlay instead of calling window.print()
+        setMobileOverlayMode(printMode);
+        setPrintMode(null);
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+      }
     }
   }, [printMode]);
 
@@ -1862,6 +1921,9 @@ function Dashboard({ data }) {
               </div>
               {rentedContent}
               {printMode === "rented" && <PrintPortal>{rentedContent}</PrintPortal>}
+              {mobileOverlayMode === "rented" && (
+                <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{rentedContent}</MobilePrintOverlay>
+              )}
             </div>
           );
         })()}
@@ -1901,6 +1963,9 @@ function Dashboard({ data }) {
               </div>
               {depotContent}
               {printMode === "depot" && <PrintPortal>{depotContent}</PrintPortal>}
+              {mobileOverlayMode === "depot" && (
+                <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{depotContent}</MobilePrintOverlay>
+              )}
             </div>
           );
         })()}
@@ -1944,6 +2009,9 @@ function Dashboard({ data }) {
             </div>
             {pendingContent}
             {printMode === "pending" && <PrintPortal>{pendingContent}</PrintPortal>}
+            {mobileOverlayMode === "pending" && (
+              <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{pendingContent}</MobilePrintOverlay>
+            )}
           </div>
         );
       })()}
@@ -3128,8 +3196,13 @@ function InvoiceArchive({ data, persist }) {
 
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
+  const [showMobileOverlay, setShowMobileOverlay] = useState(false);
 
   const handlePrint = () => {
+    if (isMobileDevice()) {
+      setShowMobileOverlay(true);
+      return;
+    }
     const party = data.parties.find((p) => p.id === invoice.partyId);
     const partyLabel = party ? party.name : "Invoice";
     const dateLabel = invoice.billStart && invoice.billEnd ? `${fmtDateDisplay(invoice.billStart)} - ${fmtDateDisplay(invoice.billEnd)}` : "";
@@ -3226,6 +3299,9 @@ function InvoicePrintView({ data, invoice }) {
       </div>
       {sheet}
       <PrintPortal>{sheet}</PrintPortal>
+      {showMobileOverlay && (
+        <MobilePrintOverlay onClose={() => setShowMobileOverlay(false)}>{sheet}</MobilePrintOverlay>
+      )}
     </Panel>
   );
 }
@@ -3242,6 +3318,7 @@ const emptyPaymentForm = () => ({
 function PartyLedger({ data, persist }) {
   const [partyId, setPartyId] = useState("");
   const [printMode, setPrintMode] = useState(null); // "rented" | "timeline" | null
+  const [mobileOverlayMode, setMobileOverlayMode] = useState(null);
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
   const party = data.parties.find((p) => p.id === partyId);
@@ -3264,8 +3341,13 @@ function PartyLedger({ data, persist }) {
   useEffect(() => {
     if (printMode && printRequested.current) {
       printRequested.current = false;
-      // one extra frame so the browser has painted the portal before we print
-      requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+      if (isMobileDevice()) {
+        setMobileOverlayMode(printMode);
+        setPrintMode(null);
+      } else {
+        // one extra frame so the browser has painted the portal before we print
+        requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+      }
     }
   }, [printMode]);
 
@@ -3497,6 +3579,9 @@ function PartyLedger({ data, persist }) {
                 </div>
                 {rentedContent}
                 {printMode === "rented" && <PrintPortal>{rentedContent}</PrintPortal>}
+                {mobileOverlayMode === "rented" && (
+                  <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{rentedContent}</MobilePrintOverlay>
+                )}
               </div>
             );
           })()}
@@ -3539,6 +3624,9 @@ function PartyLedger({ data, persist }) {
                 </div>
                 {timelineContent}
                 {printMode === "timeline" && <PrintPortal>{timelineContent}</PrintPortal>}
+                {mobileOverlayMode === "timeline" && (
+                  <MobilePrintOverlay onClose={() => setMobileOverlayMode(null)}>{timelineContent}</MobilePrintOverlay>
+                )}
               </div>
             );
           })()}
@@ -4115,6 +4203,7 @@ const globalCss = `
     html, body { width: 100%; height: auto; }
     .app-shell { display: none !important; }
     .print-portal { display: block !important; padding: 10mm; box-sizing: border-box; }
+    .mobile-print-close-bar { display: none !important; }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
     .table-wrap table { width: 100%; }
