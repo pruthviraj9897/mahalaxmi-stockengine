@@ -1751,13 +1751,18 @@ function partyCode(data, id) {
 
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
-  const [viewRented, setViewRented] = useState(false);
-  const [viewDepot, setViewDepot] = useState(false);
-  const [viewPending, setViewPending] = useState(false);
 
   // Each portal carries a permanent unique class. triggerPrint sets a
   // data-print attribute on <body> so CSS shows only that portal, then
   // calls window.print() — no refs, no class toggling, no mobile races.
+  //
+  // IMPORTANT: window.print() is blocking on desktop (script pauses until
+  // the dialog closes) but NON-blocking on mobile Safari/Chrome (it returns
+  // immediately, before the print view has actually rendered). Removing the
+  // data-print attribute right after window.print() therefore hides the
+  // portal again before mobile has painted it — resulting in blank printed
+  // pages. Cleaning up on the `afterprint` event (which fires on both
+  // desktop and mobile once printing is actually done) fixes this.
   const triggerPrint = (key, portalClass) => {
     document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
       el.style.maxHeight = "none";
@@ -1766,8 +1771,15 @@ function Dashboard({ data }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
+    const cleanup = () => {
+      document.body.removeAttribute("data-print");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
     window.print();
-    document.body.removeAttribute("data-print");
+    // Fallback for browsers that never fire afterprint (rare, but seen on
+    // some mobile WebViews) — clean up a few seconds later regardless.
+    setTimeout(cleanup, 3000);
   };
 
   // Unfiltered — used for depot math, which must always reflect every party.
@@ -1857,23 +1869,12 @@ function Dashboard({ data }) {
           );
           return (
             <div>
-              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                {!viewRented ? (
-                  <button style={styles.ghostBtn} onClick={() => setViewRented(true)}>
-                    <Printer size={13} /> View
-                  </button>
-                ) : (
-                  <>
-                    <button style={styles.ghostBtn} onClick={() => setViewRented(false)}>
-                      <X size={13} /> Close
-                    </button>
-                    <button style={styles.primaryBtn} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
-                      <Printer size={13} /> Print / Save PDF
-                    </button>
-                  </>
-                )}
+              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
+                  <Printer size={13} /> Print / Save PDF
+                </button>
               </div>
-              {viewRented && rentedContent}
+              {rentedContent}
               <PrintPortal extraClass="print-portal--dashboard-rented">{rentedContent}</PrintPortal>
             </div>
           );
@@ -1907,23 +1908,12 @@ function Dashboard({ data }) {
           );
           return (
             <div>
-              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-                {!viewDepot ? (
-                  <button style={styles.ghostBtn} onClick={() => setViewDepot(true)}>
-                    <Printer size={13} /> View
-                  </button>
-                ) : (
-                  <>
-                    <button style={styles.ghostBtn} onClick={() => setViewDepot(false)}>
-                      <X size={13} /> Close
-                    </button>
-                    <button style={styles.primaryBtn} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
-                      <Printer size={13} /> Print / Save PDF
-                    </button>
-                  </>
-                )}
+              <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
+                  <Printer size={13} /> Print / Save PDF
+                </button>
               </div>
-              {viewDepot && depotContent}
+              {depotContent}
               <PrintPortal extraClass="print-portal--dashboard-depot">{depotContent}</PrintPortal>
             </div>
           );
@@ -3152,6 +3142,10 @@ function InvoiceArchive({ data, persist }) {
 
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
+  // See the matching comment in Dashboard's triggerPrint — cleanup (including
+  // restoring the title) must wait for `afterprint`, not run synchronously
+  // after window.print(), or mobile Safari/Chrome (where print() is
+  // non-blocking) prints a blank page / wrong filename.
   const handlePrint = () => {
     const party = data.parties.find((p) => p.id === invoice.partyId);
     const partyLabel = party ? party.name : "Invoice";
@@ -3165,9 +3159,14 @@ function InvoicePrintView({ data, invoice }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", "invoice");
+    const cleanup = () => {
+      document.body.removeAttribute("data-print");
+      document.title = prevTitle;
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
     window.print();
-    document.body.removeAttribute("data-print");
-    document.title = prevTitle;
+    setTimeout(cleanup, 3000);
   };
 
   const sheet = (
@@ -3274,8 +3273,6 @@ function PartyLedger({ data, persist }) {
   const [partyId, setPartyId] = useState("");
   const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
-  const [viewLedgerRented, setViewLedgerRented] = useState(false);
-  const [viewLedgerTimeline, setViewLedgerTimeline] = useState(false);
   const party = data.parties.find((p) => p.id === partyId);
 
   // reset the payment form whenever the selected party changes
@@ -3283,6 +3280,9 @@ function PartyLedger({ data, persist }) {
     setPaymentForm(emptyPaymentForm());
   }, [partyId]);
 
+  // See the matching comment in Dashboard's triggerPrint — cleanup must wait
+  // for `afterprint`, not run synchronously after window.print(), or mobile
+  // Safari/Chrome (where print() is non-blocking) prints a blank page.
   const triggerPrint = (key, portalClass) => {
     document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
       el.style.maxHeight = "none";
@@ -3291,8 +3291,13 @@ function PartyLedger({ data, persist }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
+    const cleanup = () => {
+      document.body.removeAttribute("data-print");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
     window.print();
-    document.body.removeAttribute("data-print");
+    setTimeout(cleanup, 3000);
   };
 
   const canSavePayment = partyId && Number(paymentForm.amount) > 0;
@@ -3511,23 +3516,12 @@ function PartyLedger({ data, persist }) {
             );
             return (
               <div>
-                <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
-                  {!viewLedgerRented ? (
-                    <button style={styles.ghostBtn} onClick={() => setViewLedgerRented(true)}>
-                      <Printer size={15} /> View
-                    </button>
-                  ) : (
-                    <>
-                      <button style={styles.ghostBtn} onClick={() => setViewLedgerRented(false)}>
-                        <X size={13} /> Close
-                      </button>
-                      <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
-                        <Printer size={15} /> Print / Save PDF
-                      </button>
-                    </>
-                  )}
+                <div style={{ marginBottom: 10 }}>
+                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
+                    <Printer size={15} /> Print / Save PDF
+                  </button>
                 </div>
-                {viewLedgerRented && rentedContent}
+                {rentedContent}
                 <PrintPortal extraClass="print-portal--ledger-rented">{rentedContent}</PrintPortal>
               </div>
             );
@@ -3564,23 +3558,12 @@ function PartyLedger({ data, persist }) {
             );
             return (
               <div>
-                <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
-                  {!viewLedgerTimeline ? (
-                    <button style={styles.ghostBtn} onClick={() => setViewLedgerTimeline(true)}>
-                      <Printer size={15} /> View
-                    </button>
-                  ) : (
-                    <>
-                      <button style={styles.ghostBtn} onClick={() => setViewLedgerTimeline(false)}>
-                        <X size={13} /> Close
-                      </button>
-                      <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
-                        <Printer size={15} /> Print / Save PDF
-                      </button>
-                    </>
-                  )}
+                <div style={{ marginBottom: 10 }}>
+                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
+                    <Printer size={15} /> Print / Save PDF
+                  </button>
                 </div>
-                {viewLedgerTimeline && timelineContent}
+                {timelineContent}
                 <PrintPortal extraClass="print-portal--ledger-timeline">{timelineContent}</PrintPortal>
               </div>
             );
