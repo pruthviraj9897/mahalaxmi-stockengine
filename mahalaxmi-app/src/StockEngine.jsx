@@ -3035,7 +3035,7 @@ function InvoicePrintView({ data, invoice }) {
             const party = data.parties.find((p) => p.id === invoice.partyId);
             const refs = party?.references?.filter(Boolean) || (party?.reference ? [party.reference] : []);
             return (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
                 {/* LEFT — party details */}
                 <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
                   <div><strong>Party:</strong> {partyName(data, invoice.partyId)}</div>
@@ -3058,19 +3058,21 @@ function InvoicePrintView({ data, invoice }) {
               </div>
             );
           })()}
-          <Table
-            cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
-            rows={invoice.lines.map((l, i) => [
-              i + 1,
-              l.itemName,
-              l.qty,
-              l.feet ? `${l.rate} × ${l.feet}ft` : l.rate,
-              fmtDateDisplay(l.start),
-              fmtDateDisplay(l.end),
-              l.days,
-              l.amount.toFixed(2),
-            ])}
-          />
+          <div style={{ marginTop: 6 }}>
+            <Table
+              cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
+              rows={invoice.lines.map((l, i) => [
+                i + 1,
+                l.itemName,
+                l.qty,
+                l.feet ? `${l.rate} × ${l.feet}ft` : l.rate,
+                fmtDateDisplay(l.start),
+                fmtDateDisplay(l.end),
+                l.days,
+                l.amount.toFixed(2),
+              ])}
+            />
+          </div>
           <div style={styles.totalsBox}>
             <TotalRow label="Item Rent Amount" value={invoice.itemRentTotal} />
             {invoice.serviceTotal > 0 && <TotalRow label="  — of which Service Charges" value={invoice.serviceTotal} />}
@@ -4205,7 +4207,7 @@ const styles = {
   invoiceSheet: {
     border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 18, marginBottom: 16, background: "#fffdf9",
   },
-  invoiceLetterhead: { textAlign: "center", marginBottom: 14, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 10 },
+  invoiceLetterhead: { textAlign: "center", marginBottom: 22, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 14 },
   invoiceCompany: { fontSize: 17, fontWeight: 700, letterSpacing: 0.3 },
   invoiceTagline: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "system-ui, sans-serif" },
   invoiceAddress: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "system-ui, sans-serif" },
