@@ -13,11 +13,11 @@ const STORAGE_KEY = "mlx-stockengine-v1";
 // to "un-hide" a child of a display:none parent. Nesting the print content
 // anywhere inside app-shell therefore guarantees it prints blank. Portaling
 // it out to a body-level sibling sidesteps that entirely.
-function PrintPortal({ children, domRef }) {
+function PrintPortal({ children, domRef, extraClass }) {
   const nodeRef = useRef(null);
   if (!nodeRef.current) {
     nodeRef.current = document.createElement("div");
-    nodeRef.current.className = "print-portal";
+    nodeRef.current.className = "print-portal" + (extraClass ? " " + extraClass : "");
   }
   useEffect(() => {
     const node = nodeRef.current;
@@ -3145,30 +3145,22 @@ function InvoiceArchive({ data, persist }) {
 
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
-  const portalRef = useRef(null);
-
   const handlePrint = () => {
     const party = data.parties.find((p) => p.id === invoice.partyId);
     const partyLabel = party ? party.name : "Invoice";
     const dateLabel = invoice.billStart && invoice.billEnd ? `${fmtDateDisplay(invoice.billStart)} - ${fmtDateDisplay(invoice.billEnd)}` : "";
     const prevTitle = document.title;
     document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
-    // Mark this portal as active; hide all other portals so only this one prints.
-    document.querySelectorAll(".print-portal").forEach((el) => el.classList.remove("print-portal--active"));
-    if (portalRef.current) {
-      portalRef.current.classList.add("print-portal--active");
-      portalRef.current.querySelectorAll(".table-wrap").forEach((el) => {
-        el.style.maxHeight = "none";
-        el.style.overflow = "visible";
-        el.style.overflowX = "visible";
-        el.style.overflowY = "visible";
-      });
-      // Force reflow so mobile browser sees the class change before printing.
-      void portalRef.current.offsetHeight;
-    }
+    // The invoice portal carries "print-portal--invoice" which CSS always
+    // shows during @media print — no --active toggling needed here.
+    document.querySelectorAll(".print-portal--invoice .table-wrap").forEach((el) => {
+      el.style.maxHeight = "none";
+      el.style.overflow = "visible";
+      el.style.overflowX = "visible";
+      el.style.overflowY = "visible";
+    });
     window.print();
     document.title = prevTitle;
-    if (portalRef.current) portalRef.current.classList.remove("print-portal--active");
   };
 
   const sheet = (
@@ -3257,7 +3249,7 @@ function InvoicePrintView({ data, invoice }) {
         </button>
       </div>
       {sheet}
-      <PrintPortal domRef={portalRef}>{sheet}</PrintPortal>
+      <PrintPortal extraClass="print-portal--invoice">{sheet}</PrintPortal>
     </Panel>
   );
 }
@@ -4151,6 +4143,7 @@ const globalCss = `
        the base rule and works correctly on mobile Safari / Chrome. */
     .print-portal { display: none !important; }
     .print-portal--active { display: block !important; padding: 10mm; box-sizing: border-box; }
+    .print-portal--invoice { display: block !important; padding: 10mm; box-sizing: border-box; }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
     .table-wrap table { width: 100%; }
