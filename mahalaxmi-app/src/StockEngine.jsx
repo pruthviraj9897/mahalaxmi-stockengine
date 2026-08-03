@@ -3983,10 +3983,10 @@ const globalCss = `
   .print-portal { display: none; }
 
   @media print {
-    @page { size: A4; margin: 10mm; }
+    @page { size: A4; margin: 0; }
     html, body { width: 100%; height: auto; }
     .app-shell { display: none !important; }
-    .print-portal { display: block !important; }
+    .print-portal { display: block !important; padding: 10mm; box-sizing: border-box; }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
     .table-wrap table { width: 100%; }
@@ -4004,11 +4004,11 @@ const globalCss = `
   }
 
   @media print and (orientation: landscape) {
-    @page { size: A4 landscape; margin: 10mm; }
+    @page { size: A4 landscape; margin: 0; }
   }
 
   @media print and (orientation: portrait) {
-    @page { size: A4 portrait; margin: 10mm; }
+    @page { size: A4 portrait; margin: 0; }
   }
 
   /* ---- Mobile layout (phones/small tablets) ---- */
