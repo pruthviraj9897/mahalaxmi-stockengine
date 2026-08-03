@@ -39,29 +39,51 @@ function isMobileDevice() {
 }
 
 // Full-screen white overlay shown on mobile when the user taps "Print / Save PDF".
-// Renders the print content into the DOM first, then fires window.print() so the
-// browser's native print/save-PDF dialog opens with the real content visible.
+// Before calling window.print(), we collapse the overlay wrapper to position:static
+// so mobile browsers (iOS Safari, Android Chrome) can see and print the content —
+// fixed/overflow containers are often excluded from mobile print rendering entirely.
 function MobilePrintOverlay({ children, onClose }) {
-  // After the overlay paints, fire window.print() immediately so the native
-  // print dialog opens. After the dialog closes (afterprint), clean up.
+  const wrapRef = useRef(null);
+
   useEffect(() => {
-    // Two rAF frames to ensure the browser has fully painted the overlay
+    const handleBeforePrint = () => {
+      if (wrapRef.current) {
+        // Collapse to normal flow so the content is in the print document
+        wrapRef.current.style.position = "static";
+        wrapRef.current.style.overflow = "visible";
+        wrapRef.current.style.zIndex = "auto";
+        wrapRef.current.style.height = "auto";
+      }
+      // Also hide app-shell so only our content appears
+      const shell = document.querySelector(".app-shell");
+      if (shell) shell.style.display = "none";
+    };
+    const handleAfterPrint = () => {
+      // Restore app-shell
+      const shell = document.querySelector(".app-shell");
+      if (shell) shell.style.display = "";
+      onClose();
+    };
+
+    window.addEventListener("beforeprint", handleBeforePrint);
+    window.addEventListener("afterprint", handleAfterPrint);
+
+    // Trigger print after two frames so the overlay is fully painted
     const id1 = requestAnimationFrame(() => {
-      const id2 = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
         window.print();
       });
-      return () => cancelAnimationFrame(id2);
     });
-    const handleAfterPrint = () => { onClose(); };
-    window.addEventListener("afterprint", handleAfterPrint);
+
     return () => {
       cancelAnimationFrame(id1);
+      window.removeEventListener("beforeprint", handleBeforePrint);
       window.removeEventListener("afterprint", handleAfterPrint);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return createPortal(
-    <div className="mobile-print-overlay" style={{
+    <div ref={wrapRef} className="mobile-print-overlay" style={{
       position: "fixed", inset: 0, zIndex: 9999,
       background: "#fff", overflowY: "auto",
       fontFamily: "Georgia, 'Iowan Old Style', serif",
@@ -4193,17 +4215,23 @@ const globalCss = `
   .print-portal { display: none; }
 
   @media print {
-    @page { size: A4; margin: 0; }
-    html, body { width: 100%; height: auto; }
+    @page { size: A4; margin: 10mm; }
+    html, body { width: 100%; height: auto; background: #fff !important; }
     .app-shell { display: none !important; }
     .print-portal { display: block !important; padding: 10mm; box-sizing: border-box; }
-    /* Mobile overlay: show as a normal block so its content prints */
+    /* Mobile overlay: collapsed to static flow by beforeprint JS handler above,
+       so its children are visible to the print engine */
     .mobile-print-overlay {
       position: static !important;
       overflow: visible !important;
+      height: auto !important;
+      width: 100% !important;
       z-index: auto !important;
-      padding: 10mm !important;
+      background: #fff !important;
       box-sizing: border-box !important;
+    }
+    .mobile-print-overlay > div {
+      padding: 0 !important;
     }
     .print-page-break { page-break-after: always; }
     .table-wrap { max-height: none !important; overflow: visible !important; }
