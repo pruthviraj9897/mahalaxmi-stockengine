@@ -1848,7 +1848,7 @@ function Dashboard({ data }) {
 /* ---------------- Party Master ---------------- */
 
 function PartyMaster({ data, persist }) {
-  const blank = { name: "", address: "", siteName: "", phone: "", reference: "", gstin: "", requiresGst: false, gstType: "CGST_SGST" };
+  const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -1876,7 +1876,7 @@ function PartyMaster({ data, persist }) {
       address: p.address || "",
       siteName: p.siteName || "",
       phone: p.phone || "",
-      reference: p.reference || "",
+      references: p.references?.length ? p.references : (p.reference ? [p.reference] : [""]),
       gstin: p.gstin || "",
       requiresGst: !!p.requiresGst,
       gstType: p.gstType || "CGST_SGST",
@@ -1903,7 +1903,40 @@ function PartyMaster({ data, persist }) {
         </div>
         <div style={styles.formRow}>
           <Field label="Address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} wide />
-          <Field label="Reference" value={form.reference} onChange={(v) => setForm({ ...form, reference: v })} />
+          <div style={{ ...styles.field, minWidth: 220 }}>
+            <span style={styles.fieldLabel}>References</span>
+            {(form.references || [""]).map((ref, idx) => (
+              <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
+                <input
+                  style={{ ...styles.input, flex: 1 }}
+                  value={ref}
+                  placeholder={`Reference ${idx + 1}`}
+                  onChange={(e) => {
+                    const refs = [...(form.references || [""])];
+                    refs[idx] = e.target.value;
+                    setForm({ ...form, references: refs });
+                  }}
+                />
+                {(form.references || [""]).length > 1 && (
+                  <button
+                    style={{ ...styles.iconBtn, color: COLORS.danger }}
+                    onClick={() => {
+                      const refs = (form.references || [""]).filter((_, i) => i !== idx);
+                      setForm({ ...form, references: refs });
+                    }}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              style={{ ...styles.ghostBtn, marginTop: 2, fontSize: 11.5 }}
+              onClick={() => setForm({ ...form, references: [...(form.references || [""]), ""] })}
+            >
+              <Plus size={12} /> Add Reference
+            </button>
+          </div>
         </div>
         <div style={styles.formRow}>
           <label style={{ ...styles.field, flexDirection: "row", alignItems: "center", gap: 8, minWidth: 160 }}>
@@ -1943,12 +1976,16 @@ function PartyMaster({ data, persist }) {
           <Empty text="No parties yet — add one above." />
         ) : (
           <Table
-            cols={["Code", "Name", "Site", "Phone", "GST", ""]}
+            cols={["Code", "Name", "Site", "Phone", "References", "GST", ""]}
             rows={data.parties.map((p) => [
               <span style={styles.codeTag}>{p.code}</span>,
               p.name,
               p.siteName || "—",
               p.phone || "—",
+              (() => {
+                const refs = p.references?.filter(Boolean) || (p.reference ? [p.reference] : []);
+                return refs.length ? refs.join(", ") : "—";
+              })(),
               p.requiresGst
                 ? <span style={styles.tinyTag}>{p.gstType === "IGST" ? "IGST 18%" : "CGST+SGST 18%"}</span>
                 : <span style={{ color: COLORS.muted, fontSize: 12 }}>—</span>,
@@ -2994,20 +3031,33 @@ function InvoicePrintView({ data, invoice }) {
             <div style={styles.invoiceAddress}>{company.address} · {company.email}{company.gstin ? ` · GSTIN: ${company.gstin}` : ""}</div>
             {invoice.gst?.applicable && <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>TAX INVOICE</div>}
           </div>
-          <div style={styles.invoiceMetaRow}>
-            <span><strong>Party:</strong> {partyName(data, invoice.partyId)}</span>
-            <span><strong>Invoice No.:</strong> {invoice.invoiceNo}</span>
-            <span><strong>Invoice Date:</strong> {fmtDateDisplay(invoice.invoiceDate)}</span>
-          </div>
-          {invoice.gst?.applicable && (
-            <div style={styles.invoiceMetaRow}>
-              <span><strong>Party GSTIN:</strong> {data.parties.find((p) => p.id === invoice.partyId)?.gstin || "—"}</span>
-              <span><strong>Tax Type:</strong> {invoice.gst.gstType === "IGST" ? "IGST" : "CGST + SGST"}</span>
-            </div>
-          )}
-          <div style={styles.invoiceMetaRow}>
-            <span><strong>Billing Period:</strong> {fmtDateDisplay(invoice.billStart)} → {fmtDateDisplay(invoice.billEnd)}</span>
-          </div>
+          {(() => {
+            const party = data.parties.find((p) => p.id === invoice.partyId);
+            const refs = party?.references?.filter(Boolean) || (party?.reference ? [party.reference] : []);
+            return (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 12, flexWrap: "wrap" }}>
+                {/* LEFT — party details */}
+                <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+                  <div><strong>Party:</strong> {partyName(data, invoice.partyId)}</div>
+                  {party?.address && <div><strong>Address:</strong> {party.address}</div>}
+                  {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
+                  {refs.length > 0 && <div><strong>Ref:</strong> {refs.join(", ")}</div>}
+                  {invoice.gst?.applicable && (
+                    <>
+                      <div><strong>Party GSTIN:</strong> {party?.gstin || "—"}</div>
+                      <div><strong>Tax Type:</strong> {invoice.gst.gstType === "IGST" ? "IGST" : "CGST + SGST"}</div>
+                    </>
+                  )}
+                </div>
+                {/* RIGHT — invoice no & date */}
+                <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
+                  <div><strong>Invoice No.:</strong> {invoice.invoiceNo}</div>
+                  <div><strong>Invoice Date:</strong> {fmtDateDisplay(invoice.invoiceDate)}</div>
+                  <div><strong>Billing Period:</strong> {fmtDateDisplay(invoice.billStart)} → {fmtDateDisplay(invoice.billEnd)}</div>
+                </div>
+              </div>
+            );
+          })()}
           <Table
             cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
             rows={invoice.lines.map((l, i) => [
