@@ -1791,9 +1791,15 @@ function Dashboard({ data }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
-    window.print();
-    schedulePrintCleanup(() => {
-      document.body.removeAttribute("data-print");
+    // See InvoicePrintView.handlePrint for why this waits two frames before
+    // printing — avoids blank output on mobile "Save as PDF".
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        schedulePrintCleanup(() => {
+          document.body.removeAttribute("data-print");
+        });
+      });
     });
   };
 
@@ -3163,8 +3169,14 @@ function InvoicePrintView({ data, invoice }) {
   // can print a blank page / wrong filename on larger content like this.
   const handlePrint = () => {
     const party = data.parties.find((p) => p.id === invoice.partyId);
-    const partyLabel = party ? party.name : "Invoice";
-    const dateLabel = invoice.billStart && invoice.billEnd ? `${fmtDateDisplay(invoice.billStart)} - ${fmtDateDisplay(invoice.billEnd)}` : "";
+    // Filenames can't contain \ / : * ? " < > | — dates render as DD/MM/YYYY
+    // on screen, so strip/replace anything filesystem-unsafe before using it
+    // as document.title (which mobile browsers use as the "Save as PDF" name).
+    const sanitizeForFilename = (s) => String(s || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
+    const partyLabel = sanitizeForFilename(party ? party.name : "Invoice");
+    const dateLabel = invoice.billStart && invoice.billEnd
+      ? `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} - ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`
+      : "";
     const prevTitle = document.title;
     document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
     document.querySelectorAll(".print-portal--invoice .table-wrap").forEach((el) => {
@@ -3174,10 +3186,19 @@ function InvoicePrintView({ data, invoice }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", "invoice");
-    window.print();
-    schedulePrintCleanup(() => {
-      document.body.removeAttribute("data-print");
-      document.title = prevTitle;
+    // On mobile Chrome/Safari, window.print() can capture the page before
+    // the browser has actually painted the changes above (new title, visible
+    // print portal, expanded table). Waiting two animation frames lets the
+    // browser finish that paint first — without this, mobile "Save as PDF"
+    // can produce a blank page and/or ignore the renamed title.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        schedulePrintCleanup(() => {
+          document.body.removeAttribute("data-print");
+          document.title = prevTitle;
+        });
+      });
     });
   };
 
@@ -3303,9 +3324,15 @@ function PartyLedger({ data, persist }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
-    window.print();
-    schedulePrintCleanup(() => {
-      document.body.removeAttribute("data-print");
+    // See InvoicePrintView.handlePrint for why this waits two frames before
+    // printing — avoids blank output on mobile "Save as PDF".
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+        schedulePrintCleanup(() => {
+          document.body.removeAttribute("data-print");
+        });
+      });
     });
   };
 
