@@ -1482,27 +1482,72 @@ export default function StockEngine({ session, onLogout }) {
             .then(() => {});
         }
       } catch {
-        setData(buildSeedData());
+        // Supabase fetch failed (e.g. offline). Fall back to the last
+        // locally-cached snapshot rather than dropping straight to seed
+        // data, so a network hiccup on load can't look like data loss.
+        let cached = null;
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) cached = JSON.parse(raw);
+        } catch {
+          cached = null;
+        }
+        setData(cached || buildSeedData());
       }
       setLoading(false);
     })();
   }, []);
 
-  const persist = useCallback(async (next) => {
-    setData(next);
-    setSaveState("saving");
+  // Holds the most recent unsaved snapshot whenever a save has failed after
+  // all retries, so the "Retry" button can re-send exactly that payload.
+  const pendingSaveRef = useRef(null);
+
+  // Best-effort local backup, written on every change regardless of whether
+  // the Supabase write succeeds. This is what makes data recoverable if the
+  // network is down for good: even then, nothing is lost from the browser.
+  const writeLocalBackup = useCallback((next) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Storage unavailable/full — local backup is best-effort only.
+    }
+  }, []);
+
+  // Sends `next` to Supabase, retrying a couple of times on failure (network
+  // blips are often momentary) before giving up and surfacing a visible,
+  // retryable error instead of silently reverting to "idle".
+  const attemptSave = useCallback(async (next, attempt = 1) => {
     try {
       const { error } = await supabase
         .from("app_state")
         .update({ data: next, updated_at: new Date().toISOString() })
         .eq("id", "default");
       if (error) throw error;
+      pendingSaveRef.current = null;
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 1200);
     } catch {
-      setSaveState("idle");
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, attempt * 1000));
+        return attemptSave(next, attempt + 1);
+      }
+      pendingSaveRef.current = next;
+      setSaveState("error");
     }
   }, []);
+
+  const persist = useCallback(async (next) => {
+    setData(next);
+    writeLocalBackup(next); // safety net: local copy exists even if the network write below fails
+    setSaveState("saving");
+    attemptSave(next);
+  }, [attemptSave, writeLocalBackup]);
+
+  const retrySave = useCallback(() => {
+    if (!pendingSaveRef.current) return;
+    setSaveState("saving");
+    attemptSave(pendingSaveRef.current);
+  }, [attemptSave]);
 
   if (loading || !data) {
     return (
@@ -1588,6 +1633,21 @@ export default function StockEngine({ session, onLogout }) {
           {saveState === "saving" && <span style={styles.saveDim}>Saving…</span>}
           {saveState === "saved" && (
             <span style={styles.saveOk}><CheckCircle2 size={13} /> Saved</span>
+          )}
+          {saveState === "error" && (
+            <span style={{ color: "#e0745a", display: "flex", alignItems: "center", gap: 6 }}>
+              <AlertCircle size={13} /> Not saved
+              <button
+                onClick={retrySave}
+                style={{
+                  background: "transparent", border: "1px solid #e0745a", borderRadius: 4,
+                  color: "#e0745a", fontSize: 10.5, padding: "1px 6px", cursor: "pointer",
+                  fontFamily: "system-ui, sans-serif",
+                }}
+              >
+                Retry
+              </button>
+            </span>
           )}
         </div>
         <div style={{ padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
