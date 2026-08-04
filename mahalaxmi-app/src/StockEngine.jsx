@@ -1330,6 +1330,24 @@ export default function StockEngine({ session, onLogout }) {
     link.href = href;
   }, []);
 
+  // ---- TEMPORARY DEBUG TOOL ---------------------------------------------
+  // Loads Eruda (an on-device DevTools console) so console errors/logs are
+  // visible directly on the phone — a small floating button appears in the
+  // bottom-right corner; tap it to open Console/Network/Elements tabs, just
+  // like desktop DevTools. Safe to leave in for now; remove this whole
+  // effect (and the "eruda" name won't appear anywhere else) once the
+  // mobile print/PDF issue is confirmed fixed and you don't need it anymore.
+  useEffect(() => {
+    if (window.eruda) return;
+    const script = document.createElement("script");
+    script.src = "https://cdn.jsdelivr.net/npm/eruda@3/eruda.min.js";
+    script.onload = () => {
+      if (window.eruda) window.eruda.init();
+    };
+    document.body.appendChild(script);
+  }, []);
+  // ------------------------------------------------------------------------
+
   // Prevent the Enter key from triggering any Save/Add/Submit action.
   // Blocks Enter on inputs (stops form-submit behaviour) AND on buttons
   // (stops keyboard-click on a focused button). Users must click buttons
