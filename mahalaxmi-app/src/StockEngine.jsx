@@ -135,7 +135,10 @@ async function renderNodeToPdf(node) {
   try {
     const { html2canvas, jsPDF } = await loadPdfLibs();
     const canvas = await html2canvas(node, {
-      scale: Math.min(2, window.devicePixelRatio || 1.5),
+      // Fixed at 3x (rather than capped at 2x by devicePixelRatio) so text
+      // and table rules stay crisp when zoomed, regardless of the exporting
+      // device's screen density.
+      scale: 3,
       useCORS: true,
       backgroundColor: "#ffffff",
     });
@@ -146,7 +149,7 @@ async function renderNodeToPdf(node) {
     const pxPerMm = canvas.width / usableWmm;
     const pageHeightPx = Math.floor(usableHmm * pxPerMm);
 
-    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4", compress: true });
     let renderedPx = 0;
     let firstPage = true;
     while (renderedPx < canvas.height) {
@@ -157,9 +160,9 @@ async function renderNodeToPdf(node) {
       pageCanvas.getContext("2d").drawImage(
         canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
       );
-      const imgData = pageCanvas.toDataURL("image/jpeg", 0.95);
+      const imgData = pageCanvas.toDataURL("image/png");
       if (!firstPage) pdf.addPage();
-      pdf.addImage(imgData, "JPEG", marginMm, marginMm, usableWmm, sliceHeightPx / pxPerMm);
+      pdf.addImage(imgData, "PNG", marginMm, marginMm, usableWmm, sliceHeightPx / pxPerMm);
       renderedPx += sliceHeightPx;
       firstPage = false;
     }
