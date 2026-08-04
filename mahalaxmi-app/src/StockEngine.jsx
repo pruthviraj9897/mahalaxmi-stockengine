@@ -31,48 +31,130 @@ function PrintPortal({ children, domRef, extraClass }) {
   return createPortal(children, nodeRef.current);
 }
 
-// Schedules `cleanup` to run once printing has actually finished, instead of
-// guessing with a fixed delay. Desktop fires `afterprint` reliably. iOS
-// Safari often skips `afterprint`, but reliably fires `focus` on the window
-// when the native print/share sheet closes — so we listen for both and run
-// on whichever comes first. The 60s timeout is a last-resort safety net for
-// the rare browser that fires neither; it should practically never trigger.
-// Cleanup NEVER runs on a fixed short delay after window.print() — that
-// guess is what caused blank print pages on mobile (content got hidden
-// again before the browser had actually painted/captured the print view).
-// Schedules `cleanup` to run once printing has actually finished, instead of
-// guessing with a fixed delay. Desktop fires `afterprint` reliably.
-//
-// Mobile (esp. Android Chrome) does NOT reliably signal "done" via `focus`:
-// the OS print/save flow can fire a window `focus` event while it is still
-// generating/writing the actual PDF file in the background (the on-screen
-// preview the user sees is a separate, earlier snapshot). If we revert the
-// print-ready DOM (remove data-print, restore the title) at that premature
-// `focus`, Android's final PDF write happens *after* the revert — producing
-// a blank page at the browser's default size instead of our A4 print layout,
-// and a title that's already back to normal (breaking the filename rename).
-// This exactly matches the reported symptom: preview looks right, saved
-// file is blank and wrongly named/sized.
-//
-// Fix: don't use `focus` at all. Instead, revert on the user's NEXT real
-// tap/click anywhere on the page. That can only happen once the whole native
-// print/save flow has fully closed and control has returned to the page —
-// so it can't fire early. Leaving data-print/the renamed title in place a
-// little longer is harmless: data-print only affects @media print (never
-// normal on-screen display), and a lingering tab title is cosmetic.
-function schedulePrintCleanup(cleanup) {
-  let done = false;
-  const run = () => {
-    if (done) return;
-    done = true;
-    cleanup();
-    window.removeEventListener("afterprint", run);
-    document.removeEventListener("pointerdown", run, true);
-    clearTimeout(fallback);
+// ---- PDF EXPORT (replaces native window.print() "Save as PDF") ----------
+// Android's native print-to-PDF pipeline proved unreliable across several
+// rounds of fixes (timing, user-activation, composited-layer CSS) — the
+// on-screen preview always looked right, but the file Android actually
+// wrote was sometimes blank/wrong-sized regardless. Rather than keep
+// chasing platform quirks we can't fully control, we render the target
+// content to a canvas ourselves (html2canvas) and assemble the PDF file
+// directly (jsPDF), then trigger a normal download. This produces an
+// identical file on every device/browser, independent of the OS's print
+// pipeline entirely.
+
+let _pdfLibsPromise = null;
+function loadScript(src, getGlobal) {
+  return new Promise((resolve, reject) => {
+    const existing = getGlobal();
+    if (existing) { resolve(existing); return; }
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = () => {
+      const g = getGlobal();
+      if (g) resolve(g);
+      else reject(new Error("Loaded but global missing: " + src));
+    };
+    script.onerror = () => reject(new Error("Failed to load " + src));
+    document.body.appendChild(script);
+  });
+}
+function loadPdfLibs() {
+  if (_pdfLibsPromise) return _pdfLibsPromise;
+  _pdfLibsPromise = Promise.all([
+    loadScript("https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js", () => window.html2canvas),
+    loadScript("https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js", () => window.jspdf && window.jspdf.jsPDF),
+  ]).then(([html2canvas, jsPDF]) => ({ html2canvas, jsPDF }));
+  return _pdfLibsPromise;
+}
+
+// Renders `portalClass` (a .print-portal--* node already in the DOM, see
+// PrintPortal above) to a PDF and downloads it as `filename`. The node
+// normally sits off-screen with display:none (it's only ever meant to be
+// revealed by @media print); we temporarily make it paintable at a fixed
+// A4-width layout, capture it, then put it back exactly as it was.
+async function exportPortalToPdf(portalClass, filename) {
+  const node = document.querySelector("." + portalClass);
+  if (!node) throw new Error("Print portal not found: " + portalClass);
+
+  // Expand any scrollable table containers so the full table gets captured,
+  // not just the scrolled viewport — same as the old print CSS did.
+  const wraps = node.querySelectorAll(".table-wrap");
+  const prevWrapStyles = Array.from(wraps).map((el) => ({
+    el, maxHeight: el.style.maxHeight, overflow: el.style.overflow,
+    overflowX: el.style.overflowX, overflowY: el.style.overflowY,
+  }));
+  wraps.forEach((el) => {
+    el.style.maxHeight = "none";
+    el.style.overflow = "visible";
+    el.style.overflowX = "visible";
+    el.style.overflowY = "visible";
+  });
+
+  const prevStyle = {
+    display: node.style.display, position: node.style.position,
+    left: node.style.left, top: node.style.top,
+    width: node.style.width, zIndex: node.style.zIndex,
+    background: node.style.background, padding: node.style.padding,
   };
-  window.addEventListener("afterprint", run);
-  document.addEventListener("pointerdown", run, { capture: true, once: true });
-  const fallback = setTimeout(run, 60000);
+  node.style.display = "block";
+  node.style.position = "fixed";
+  node.style.left = "-10000px";
+  node.style.top = "0";
+  node.style.width = "210mm"; // A4 width, so layout matches the printed page
+  node.style.zIndex = "-1";
+  node.style.background = "#ffffff";
+  node.style.padding = "10mm";
+
+  // Let layout/paint settle before capturing.
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  try {
+    const { html2canvas, jsPDF } = await loadPdfLibs();
+    const canvas = await html2canvas(node, {
+      scale: Math.min(2, window.devicePixelRatio || 1.5),
+      useCORS: true,
+      backgroundColor: "#ffffff",
+    });
+
+    const pageWmm = 210, pageHmm = 297, marginMm = 10;
+    const usableWmm = pageWmm - marginMm * 2;
+    const usableHmm = pageHmm - marginMm * 2;
+    const pxPerMm = canvas.width / usableWmm;
+    const pageHeightPx = Math.floor(usableHmm * pxPerMm);
+
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    let renderedPx = 0;
+    let firstPage = true;
+    while (renderedPx < canvas.height) {
+      const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedPx);
+      const pageCanvas = document.createElement("canvas");
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceHeightPx;
+      pageCanvas.getContext("2d").drawImage(
+        canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx
+      );
+      const imgData = pageCanvas.toDataURL("image/jpeg", 0.95);
+      if (!firstPage) pdf.addPage();
+      pdf.addImage(imgData, "JPEG", marginMm, marginMm, usableWmm, sliceHeightPx / pxPerMm);
+      renderedPx += sliceHeightPx;
+      firstPage = false;
+    }
+
+    pdf.save(filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf");
+  } finally {
+    Object.assign(node.style, prevStyle);
+    prevWrapStyles.forEach(({ el, maxHeight, overflow, overflowX, overflowY }) => {
+      el.style.maxHeight = maxHeight;
+      el.style.overflow = overflow;
+      el.style.overflowX = overflowX;
+      el.style.overflowY = overflowY;
+    });
+  }
+}
+
+// Filenames can't contain \ / : * ? " < > | — shared by all PDF exports.
+function sanitizeForFilename(s) {
+  return String(s || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
 }
 
 // Dates are always stored as YYYY-MM-DD internally (required by <input type="date">).
@@ -1822,38 +1904,35 @@ function partyCode(data, id) {
 
 /* ---------------- Dashboard ---------------- */
 
+const DASHBOARD_REPORT_LABELS = {
+  "dashboard-rented": "Rented Stock",
+  "dashboard-depot": "Depot Stock",
+  "dashboard-pending": "Pending Challan Stock",
+};
+
 function Dashboard({ data }) {
   const [filterPartyId, setFilterPartyId] = useState("");
+  // Which report (if any) is currently being turned into a PDF — used to
+  // disable/relabel the triggering button so a second tap can't overlap it.
+  const [exportingKey, setExportingKey] = useState(null);
 
-  // Each portal carries a permanent unique class. triggerPrint sets a
-  // data-print attribute on <body> so CSS shows only that portal, then
-  // calls window.print() — no refs, no class toggling, no mobile races.
-  //
-  // IMPORTANT: window.print() is blocking on desktop (script pauses until
-  // the dialog closes) but NON-blocking on mobile Safari/Chrome (it returns
-  // immediately, before the print view has actually rendered). Cleanup is
-  // handled by schedulePrintCleanup (see its comment above) instead of a
-  // fixed delay, which is what caused blank printed pages on mobile.
-  const triggerPrint = (key, portalClass) => {
-    document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
-      el.style.maxHeight = "none";
-      el.style.overflow = "visible";
-      el.style.overflowX = "visible";
-      el.style.overflowY = "visible";
-    });
-    document.body.setAttribute("data-print", key);
-    // Force the DOM/attribute changes above to apply RIGHT NOW (synchronous
-    // reflow) instead of waiting a frame for paint. We deliberately do NOT
-    // defer window.print() via requestAnimationFrame — on Android Chrome,
-    // calling print() outside the same tick as the user's tap can drop
-    // "user activation", which makes the OS "Save as PDF" pipeline fall back
-    // to a blank/generic capture even though the on-screen preview looks
-    // correct. Staying synchronous keeps window.print() tied to the tap.
-    void document.body.offsetHeight;
-    window.print();
-    schedulePrintCleanup(() => {
-      document.body.removeAttribute("data-print");
-    });
+  // Renders the matching print-portal to a PDF and downloads it directly.
+  // See exportPortalToPdf's comment near the top of the file for why we
+  // generate the PDF ourselves instead of using window.print().
+  const triggerPrint = async (key, portalClass) => {
+    if (exportingKey) return;
+    setExportingKey(key);
+    try {
+      const scope = filterPartyId ? partyName(data, filterPartyId) : "All Parties";
+      const today = fmtDateDisplay(new Date().toISOString().slice(0, 10));
+      const filename = `${sanitizeForFilename(DASHBOARD_REPORT_LABELS[key] || key)} - ${sanitizeForFilename(scope)} - ${sanitizeForFilename(today)}`;
+      await exportPortalToPdf(portalClass, filename);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("Couldn't generate the PDF. Please try again.");
+    } finally {
+      setExportingKey(null);
+    }
   };
 
   // Unfiltered — used for depot math, which must always reflect every party.
@@ -1944,8 +2023,8 @@ function Dashboard({ data }) {
           return (
             <div>
               <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
-                  <Printer size={13} /> Print / Save PDF
+                <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
+                  <Printer size={13} /> {exportingKey === "dashboard-rented" ? "Generating…" : "Download PDF"}
                 </button>
               </div>
               {rentedContent}
@@ -1983,8 +2062,8 @@ function Dashboard({ data }) {
           return (
             <div>
               <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
-                  <Printer size={13} /> Print / Save PDF
+                <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
+                  <Printer size={13} /> {exportingKey === "dashboard-depot" ? "Generating…" : "Download PDF"}
                 </button>
               </div>
               {depotContent}
@@ -2026,8 +2105,8 @@ function Dashboard({ data }) {
         return (
           <div>
             <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-              <button style={styles.ghostBtn} onClick={() => triggerPrint("dashboard-pending", "print-portal--dashboard-pending")}>
-                <Printer size={13} /> Print / Save PDF
+              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("dashboard-pending", "print-portal--dashboard-pending")}>
+                <Printer size={13} /> {exportingKey === "dashboard-pending" ? "Generating…" : "Download PDF"}
               </button>
             </div>
             {pendingContent}
@@ -3216,43 +3295,26 @@ function InvoiceArchive({ data, persist }) {
 
 function InvoicePrintView({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
-  // See schedulePrintCleanup's comment near the top of the file — cleanup
-  // (including restoring the title) waits for confirmed signals instead of
-  // a fixed delay, or mobile Safari/Chrome (where print() is non-blocking)
-  // can print a blank page / wrong filename on larger content like this.
-  const handlePrint = () => {
-    const party = data.parties.find((p) => p.id === invoice.partyId);
-    // Filenames can't contain \ / : * ? " < > | — dates render as DD/MM/YYYY
-    // on screen, so strip/replace anything filesystem-unsafe before using it
-    // as document.title (which mobile browsers use as the "Save as PDF" name).
-    const sanitizeForFilename = (s) => String(s || "").replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
-    const partyLabel = sanitizeForFilename(party ? party.name : "Invoice");
-    const dateLabel = invoice.billStart && invoice.billEnd
-      ? `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} - ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`
-      : "";
-    const prevTitle = document.title;
-    document.title = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
-    document.querySelectorAll(".print-portal--invoice .table-wrap").forEach((el) => {
-      el.style.maxHeight = "none";
-      el.style.overflow = "visible";
-      el.style.overflowX = "visible";
-      el.style.overflowY = "visible";
-    });
-    document.body.setAttribute("data-print", "invoice");
-    // Force the title/attribute/style changes above to apply RIGHT NOW
-    // (synchronous reflow) instead of waiting a frame for paint. We
-    // deliberately do NOT defer window.print() via requestAnimationFrame —
-    // on Android Chrome, calling print() outside the same tick as the
-    // user's tap can drop "user activation", which makes the OS "Save as
-    // PDF" pipeline fall back to a blank/generic capture (and ignore the
-    // renamed title) even though the on-screen preview looks correct.
-    // Staying synchronous keeps window.print() tied directly to the tap.
-    void document.body.offsetHeight;
-    window.print();
-    schedulePrintCleanup(() => {
-      document.body.removeAttribute("data-print");
-      document.title = prevTitle;
-    });
+  const [exporting, setExporting] = useState(false);
+  // Generates the invoice PDF directly (see exportPortalToPdf's comment near
+  // the top of the file) and downloads it as "Party - StartDate - EndDate.pdf".
+  const handlePrint = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const party = data.parties.find((p) => p.id === invoice.partyId);
+      const partyLabel = sanitizeForFilename(party ? party.name : "Invoice");
+      const dateLabel = invoice.billStart && invoice.billEnd
+        ? `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} - ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`
+        : "";
+      const filename = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
+      await exportPortalToPdf("print-portal--invoice", filename);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("Couldn't generate the PDF. Please try again.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const sheet = (
@@ -3336,8 +3398,8 @@ function InvoicePrintView({ data, invoice }) {
   return (
     <Panel title={`Invoice #${invoice.invoiceNo}`}>
       <div className="no-print" style={{ marginBottom: 14 }}>
-        <button style={styles.primaryBtn} onClick={handlePrint}>
-          <Printer size={15} /> Print / Save PDF
+        <button style={styles.primaryBtn} disabled={exporting} onClick={handlePrint}>
+          <Printer size={15} /> {exporting ? "Generating…" : "Download PDF"}
         </button>
       </div>
       {sheet}
@@ -3366,29 +3428,26 @@ function PartyLedger({ data, persist }) {
     setPaymentForm(emptyPaymentForm());
   }, [partyId]);
 
-  // See schedulePrintCleanup's comment near the top of the file — cleanup
-  // waits for confirmed signals instead of a fixed delay, or mobile
-  // Safari/Chrome (where print() is non-blocking) can print a blank page.
-  const triggerPrint = (key, portalClass) => {
-    document.querySelectorAll(`.${portalClass} .table-wrap`).forEach((el) => {
-      el.style.maxHeight = "none";
-      el.style.overflow = "visible";
-      el.style.overflowX = "visible";
-      el.style.overflowY = "visible";
-    });
-    document.body.setAttribute("data-print", key);
-    // Force the DOM/attribute changes above to apply RIGHT NOW (synchronous
-    // reflow) instead of waiting a frame for paint. We deliberately do NOT
-    // defer window.print() via requestAnimationFrame — on Android Chrome,
-    // calling print() outside the same tick as the user's tap can drop
-    // "user activation", which makes the OS "Save as PDF" pipeline fall back
-    // to a blank/generic capture even though the on-screen preview looks
-    // correct. Staying synchronous keeps window.print() tied to the tap.
-    void document.body.offsetHeight;
-    window.print();
-    schedulePrintCleanup(() => {
-      document.body.removeAttribute("data-print");
-    });
+  // Which report (if any) is currently being turned into a PDF — used to
+  // disable/relabel the triggering button so a second tap can't overlap it.
+  const [exportingKey, setExportingKey] = useState(null);
+
+  // Renders the matching print-portal to a PDF and downloads it directly.
+  // See exportPortalToPdf's comment near the top of the file for why we
+  // generate the PDF ourselves instead of using window.print().
+  const triggerPrint = async (key, portalClass) => {
+    if (exportingKey) return;
+    setExportingKey(key);
+    try {
+      const label = key === "ledger-timeline" ? "Timeline" : "Currently Rented";
+      const filename = `${sanitizeForFilename(party ? `${party.code} - ${party.name}` : "Party")} - ${label}`;
+      await exportPortalToPdf(portalClass, filename);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("Couldn't generate the PDF. Please try again.");
+    } finally {
+      setExportingKey(null);
+    }
   };
 
   const canSavePayment = partyId && Number(paymentForm.amount) > 0;
@@ -3608,8 +3667,8 @@ function PartyLedger({ data, persist }) {
             return (
               <div>
                 <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
-                    <Printer size={15} /> Print / Save PDF
+                  <button style={styles.primaryBtn} disabled={!!exportingKey} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
+                    <Printer size={15} /> {exportingKey === "ledger-rented" ? "Generating…" : "Download PDF"}
                   </button>
                 </div>
                 {rentedContent}
@@ -3650,8 +3709,8 @@ function PartyLedger({ data, persist }) {
             return (
               <div>
                 <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
-                    <Printer size={15} /> Print / Save PDF
+                  <button style={styles.primaryBtn} disabled={!!exportingKey} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
+                    <Printer size={15} /> {exportingKey === "ledger-timeline" ? "Generating…" : "Download PDF"}
                   </button>
                 </div>
                 {timelineContent}
