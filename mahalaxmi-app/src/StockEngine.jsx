@@ -1275,6 +1275,21 @@ export default function StockEngine({ session, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [navOpen, setNavOpen] = useState(false); // mobile-only sidebar drawer
 
+  // Injects the app's global stylesheet (incl. @media print rules) into
+  // <head>. This MUST live in <head>, not nested inside .app-shell — print
+  // CSS sets `.app-shell { display: none !important; }`, and a <style> tag
+  // nested under a hidden ancestor is unreliable across mobile print engines
+  // (this was the cause of blank/black "Save as PDF" output on mobile).
+  useEffect(() => {
+    let tag = document.getElementById("mlx-global-styles");
+    if (!tag) {
+      tag = document.createElement("style");
+      tag.id = "mlx-global-styles";
+      document.head.appendChild(tag);
+    }
+    tag.textContent = globalCss;
+  }, []);
+
   // Sets the browser tab icon to an amber "M" badge matching the sidebar
   // brand mark, since this app may not always control its own index.html.
   useEffect(() => {
@@ -1385,8 +1400,6 @@ export default function StockEngine({ session, onLogout }) {
 
   return (
     <div className="app-shell" style={styles.app}>
-      <style>{globalCss}</style>
-
       {/* Mobile-only top bar with hamburger — hidden on desktop via CSS */}
       <div className="mobile-topbar">
         <button
