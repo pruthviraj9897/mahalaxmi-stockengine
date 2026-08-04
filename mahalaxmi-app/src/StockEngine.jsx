@@ -4255,6 +4255,19 @@ const globalCss = `
       margin: 0 !important;
       padding: 0 !important;
     }
+    /* .sidebar and .mobile-backdrop use position:fixed + transition, which
+       promotes them to their own GPU-composited layer on mobile. Android's
+       "Save as PDF" print compositor can paint a composited fixed layer
+       independently of the DOM tree — meaning ".app-shell { display: none }"
+       above does NOT reliably suppress them, even though it should hide any
+       normal (non-composited) descendant. This is very likely the actual
+       source of the black/dark page: .sidebar's background is #241c14
+       (near-black). Force these off explicitly and take them out of fixed
+       positioning entirely during print, as defense in depth. */
+    .sidebar, .mobile-backdrop, .mobile-topbar, .mobile-menu-btn, .mobile-close-btn {
+      display: none !important;
+      position: static !important;
+    }
   }
 
   @media print and (orientation: landscape) {
