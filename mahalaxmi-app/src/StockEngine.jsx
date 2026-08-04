@@ -1824,15 +1824,17 @@ function Dashboard({ data }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
-    // See InvoicePrintView.handlePrint for why this waits two frames before
-    // printing — avoids blank output on mobile "Save as PDF".
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.print();
-        schedulePrintCleanup(() => {
-          document.body.removeAttribute("data-print");
-        });
-      });
+    // Force the DOM/attribute changes above to apply RIGHT NOW (synchronous
+    // reflow) instead of waiting a frame for paint. We deliberately do NOT
+    // defer window.print() via requestAnimationFrame — on Android Chrome,
+    // calling print() outside the same tick as the user's tap can drop
+    // "user activation", which makes the OS "Save as PDF" pipeline fall back
+    // to a blank/generic capture even though the on-screen preview looks
+    // correct. Staying synchronous keeps window.print() tied to the tap.
+    void document.body.offsetHeight;
+    window.print();
+    schedulePrintCleanup(() => {
+      document.body.removeAttribute("data-print");
     });
   };
 
@@ -3219,19 +3221,19 @@ function InvoicePrintView({ data, invoice }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", "invoice");
-    // On mobile Chrome/Safari, window.print() can capture the page before
-    // the browser has actually painted the changes above (new title, visible
-    // print portal, expanded table). Waiting two animation frames lets the
-    // browser finish that paint first — without this, mobile "Save as PDF"
-    // can produce a blank page and/or ignore the renamed title.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.print();
-        schedulePrintCleanup(() => {
-          document.body.removeAttribute("data-print");
-          document.title = prevTitle;
-        });
-      });
+    // Force the title/attribute/style changes above to apply RIGHT NOW
+    // (synchronous reflow) instead of waiting a frame for paint. We
+    // deliberately do NOT defer window.print() via requestAnimationFrame —
+    // on Android Chrome, calling print() outside the same tick as the
+    // user's tap can drop "user activation", which makes the OS "Save as
+    // PDF" pipeline fall back to a blank/generic capture (and ignore the
+    // renamed title) even though the on-screen preview looks correct.
+    // Staying synchronous keeps window.print() tied directly to the tap.
+    void document.body.offsetHeight;
+    window.print();
+    schedulePrintCleanup(() => {
+      document.body.removeAttribute("data-print");
+      document.title = prevTitle;
     });
   };
 
@@ -3357,15 +3359,17 @@ function PartyLedger({ data, persist }) {
       el.style.overflowY = "visible";
     });
     document.body.setAttribute("data-print", key);
-    // See InvoicePrintView.handlePrint for why this waits two frames before
-    // printing — avoids blank output on mobile "Save as PDF".
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.print();
-        schedulePrintCleanup(() => {
-          document.body.removeAttribute("data-print");
-        });
-      });
+    // Force the DOM/attribute changes above to apply RIGHT NOW (synchronous
+    // reflow) instead of waiting a frame for paint. We deliberately do NOT
+    // defer window.print() via requestAnimationFrame — on Android Chrome,
+    // calling print() outside the same tick as the user's tap can drop
+    // "user activation", which makes the OS "Save as PDF" pipeline fall back
+    // to a blank/generic capture even though the on-screen preview looks
+    // correct. Staying synchronous keeps window.print() tied to the tap.
+    void document.body.offsetHeight;
+    window.print();
+    schedulePrintCleanup(() => {
+      document.body.removeAttribute("data-print");
     });
   };
 
