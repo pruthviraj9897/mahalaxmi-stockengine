@@ -2770,7 +2770,7 @@ function InvoiceBuilder({ data, persist }) {
     const additionalCharges = transportTotal;
     const taxable = round2(itemRentTotal + additionalCharges);
     const netTotal = round2(taxable - depositTotal);
-    return { itemRentTotal, transportTotal, depositTotal, netTotal, taxable };
+    return { itemRentTotal, transportTotal, depositTotal, additionalCharges, netTotal, taxable };
   }, [editableLines, result, transportOverride, depositOverride]);
 
   const gst = useMemo(() => {
@@ -3126,12 +3126,12 @@ function InvoiceArchive({ data, persist }) {
               inv.invoiceNo,
               fmtDateDisplay(inv.invoiceDate),
               partyName(data, inv.partyId),
-              inv.itemRentTotal.toFixed(2),
-              inv.additionalCharges.toFixed(2),
+              Number(inv.itemRentTotal || 0).toFixed(2),
+              Number(inv.additionalCharges || 0).toFixed(2),
               inv.gst?.applicable
                 ? <span style={styles.tinyTag}>{inv.gst.gstType === "IGST" ? "IGST" : "CGST+SGST"}</span>
                 : <span style={{ color: COLORS.muted, fontSize: 12 }}>—</span>,
-              <strong>{(inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal).toFixed(2)}</strong>,
+              <strong>{Number((inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal) || 0).toFixed(2)}</strong>,
               confirmVoidId === inv.id ? (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Void this invoice?</span>
@@ -3227,7 +3227,7 @@ function InvoicePrintView({ data, invoice }) {
                 fmtDateDisplay(l.start),
                 fmtDateDisplay(l.end),
                 l.days,
-                l.amount.toFixed(2),
+                Number(l.amount || 0).toFixed(2),
               ])}
             />
           </div>
