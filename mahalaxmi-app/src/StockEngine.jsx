@@ -40,6 +40,26 @@ function PrintPortal({ children, domRef, extraClass }) {
 // Cleanup NEVER runs on a fixed short delay after window.print() — that
 // guess is what caused blank print pages on mobile (content got hidden
 // again before the browser had actually painted/captured the print view).
+// Schedules `cleanup` to run once printing has actually finished, instead of
+// guessing with a fixed delay. Desktop fires `afterprint` reliably.
+//
+// Mobile (esp. Android Chrome) does NOT reliably signal "done" via `focus`:
+// the OS print/save flow can fire a window `focus` event while it is still
+// generating/writing the actual PDF file in the background (the on-screen
+// preview the user sees is a separate, earlier snapshot). If we revert the
+// print-ready DOM (remove data-print, restore the title) at that premature
+// `focus`, Android's final PDF write happens *after* the revert — producing
+// a blank page at the browser's default size instead of our A4 print layout,
+// and a title that's already back to normal (breaking the filename rename).
+// This exactly matches the reported symptom: preview looks right, saved
+// file is blank and wrongly named/sized.
+//
+// Fix: don't use `focus` at all. Instead, revert on the user's NEXT real
+// tap/click anywhere on the page. That can only happen once the whole native
+// print/save flow has fully closed and control has returned to the page —
+// so it can't fire early. Leaving data-print/the renamed title in place a
+// little longer is harmless: data-print only affects @media print (never
+// normal on-screen display), and a lingering tab title is cosmetic.
 function schedulePrintCleanup(cleanup) {
   let done = false;
   const run = () => {
@@ -47,11 +67,11 @@ function schedulePrintCleanup(cleanup) {
     done = true;
     cleanup();
     window.removeEventListener("afterprint", run);
-    window.removeEventListener("focus", run);
+    document.removeEventListener("pointerdown", run, true);
     clearTimeout(fallback);
   };
   window.addEventListener("afterprint", run);
-  window.addEventListener("focus", run);
+  document.addEventListener("pointerdown", run, { capture: true, once: true });
   const fallback = setTimeout(run, 60000);
 }
 
