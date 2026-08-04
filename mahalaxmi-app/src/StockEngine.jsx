@@ -1658,6 +1658,42 @@ function returnedQty(data, partyId, itemId) {
   }
   return total;
 }
+// Items still physically with a party — delivered but not yet returned.
+// Shared by the Party Ledger tab and the invoice "Account Summary" section
+// so both always agree on what's outstanding.
+function partyRentedItems(data, partyId) {
+  const itemIds = new Set();
+  for (const c of data.deliveryChallans) {
+    if (c.partyId !== partyId) continue;
+    for (const l of c.lines) itemIds.add(l.itemId);
+  }
+  return [...itemIds]
+    .map((itemId) => {
+      const delivered = deliveredQty(data, partyId, itemId);
+      const returned = returnedQty(data, partyId, itemId);
+      return { itemId, delivered, returned, current: delivered - returned };
+    })
+    .filter((r) => r.current > 0)
+    .sort((a, b) => b.current - a.current);
+}
+
+// Running invoiced / paid / balance-due totals for a party, as of whatever
+// invoices currently exist in `data`. Shared by the Party Ledger tab and the
+// invoice "Account Summary" section so the numbers never drift apart.
+function partyLedgerTotals(data, partyId) {
+  const partyInvoices = data.invoices.filter((i) => i.partyId === partyId);
+  const partyPayments = (data.payments || []).filter((p) => p.partyId === partyId);
+  const invoiced = round2(partyInvoices.reduce((s, i) => s + i.netTotal, 0));
+  const paid = round2(partyPayments.reduce((s, p) => s + p.amount, 0));
+  return {
+    invoiced,
+    brokenCharges: round2(partyInvoices.reduce((s, i) => s + (i.brokenTotal || 0), 0)),
+    invoiceCount: partyInvoices.length,
+    paid,
+    balanceDue: round2(invoiced - paid),
+  };
+}
+
 function challanDeliveredQty(data, challanId, itemId) {
   const c = data.deliveryChallans.find((x) => x.id === challanId);
   if (!c) return 0;
@@ -3287,8 +3323,12 @@ function BulkInvoiceBuilder({ data, persist }) {
       let nextInvoiceNo = data.seq.invoice;
 
       // Build every invoice record up front so numbering is sequential and
-      // predictable, independent of how long each PDF capture takes.
-      const newInvoices = selected.map(({ party, result }) => {
+      // predictable, independent of how long each PDF capture takes. Each
+      // party's "prior balance" is read from `data` as it stands right now
+      // (before this run adds anything), so the PDF shows exactly what was
+      // owed walking in, plus this invoice, plus the items still with them —
+      // one clear number, not three things the party has to add up.
+      const built = selected.map(({ party, result }) => {
         const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
         const finalTotal = round2(gst.grandTotal - result.depositTotal);
         const invoice = {
@@ -3301,22 +3341,31 @@ function BulkInvoiceBuilder({ data, persist }) {
           createdAt: now, updatedAt: now,
         };
         nextInvoiceNo += 1;
-        return invoice;
+        const priorBalance = partyLedgerTotals(data, party.id).balanceDue;
+        const accountSummary = {
+          pendingItems: partyRentedItems(data, party.id),
+          priorBalance,
+          thisInvoiceAmount: finalTotal,
+          totalPayable: round2(priorBalance + finalTotal),
+        };
+        return { invoice, accountSummary };
       });
 
       // Render each invoice into the hidden capture portal one at a time,
       // wait for paint, capture it to a PDF blob, and add it to the zip.
-      for (let i = 0; i < newInvoices.length; i++) {
-        const invoice = newInvoices[i];
-        setCaptureInvoice(invoice);
+      for (let i = 0; i < built.length; i++) {
+        const { invoice, accountSummary } = built[i];
+        setCaptureInvoice({ invoice, accountSummary });
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         const blob = await pdfBlobFromNode(captureRef.current);
         const partyLabel = sanitizeForFilename(partyName(data, invoice.partyId));
-        zip.file(`${invoice.invoiceNo} - ${partyLabel}.pdf`, blob);
-        setProgress({ done: i + 1, total: newInvoices.length });
+        const periodLabel = `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} to ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`;
+        zip.file(`${invoice.invoiceNo} - ${partyLabel} - ${periodLabel}.pdf`, blob);
+        setProgress({ done: i + 1, total: built.length });
       }
 
       // Save all invoices in one go.
+      const newInvoices = built.map((b) => b.invoice);
       persist({
         ...data,
         invoices: [...data.invoices, ...newInvoices],
@@ -3349,7 +3398,7 @@ function BulkInvoiceBuilder({ data, persist }) {
 
   return (
     <div>
-      <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, then generate and download all invoices as a single zip." />
+      <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, then generate and download all invoices as a single zip. Each invoice PDF also lists items still with that party and their running balance, pulled from the Party Ledger." />
 
       <Panel title="Billing Window">
         <div style={styles.formRow}>
@@ -3416,7 +3465,9 @@ function BulkInvoiceBuilder({ data, persist }) {
                 bulk generation — never shown on screen, only painted for
                 html2canvas to read. */}
             <PrintPortal extraClass="print-portal--bulk-invoice" domRef={captureRef}>
-              {captureInvoice && <InvoiceSheet data={data} invoice={captureInvoice} />}
+              {captureInvoice && (
+                <InvoiceSheet data={data} invoice={captureInvoice.invoice} accountSummary={captureInvoice.accountSummary} />
+              )}
             </PrintPortal>
           </>
         )
@@ -3514,7 +3565,11 @@ function InvoiceArchive({ data, persist }) {
 // table, totals. Pulled out as its own component so it can be rendered both
 // on-screen (InvoicePrintView) and off-screen for single or bulk PDF capture
 // (BulkInvoiceBuilder), without duplicating the markup.
-function InvoiceSheet({ data, invoice }) {
+// `accountSummary`, when passed, adds a "Pending Items & Balance" section
+// below the totals: items the party is still holding (not yet returned),
+// plus the running balance including this invoice. Only wired up for bulk
+// invoice generation for now — see BulkInvoiceBuilder.
+function InvoiceSheet({ data, invoice, accountSummary }) {
   const company = data.company || DEFAULT_COMPANY;
   return (
     <div className="invoice-sheet" style={styles.invoiceSheet}>
@@ -3591,6 +3646,33 @@ function InvoiceSheet({ data, invoice }) {
               </>
             )}
           </div>
+          {accountSummary && (
+            <div style={{ marginTop: 22, paddingTop: 14, borderTop: `1px solid ${COLORS.border}` }}>
+              <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+                Pending Items &amp; Balance
+              </div>
+              {accountSummary.pendingItems.length > 0 ? (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 11.5, fontWeight: 600, color: COLORS.muted, marginBottom: 4 }}>
+                    Items Currently With Party (Not Yet Returned)
+                  </div>
+                  <Table
+                    cols={["Item", "Qty Held"]}
+                    rows={accountSummary.pendingItems.map((r) => [itemName(data, r.itemId), r.current])}
+                  />
+                </div>
+              ) : (
+                <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
+                  No items currently pending return with this party.
+                </div>
+              )}
+              <div style={styles.totalsBox}>
+                <TotalRow label="Balance Due Before This Invoice" value={accountSummary.priorBalance} />
+                <TotalRow label="This Invoice Amount" value={accountSummary.thisInvoiceAmount} />
+                <TotalRow label="Total Payable Now" value={accountSummary.totalPayable} big />
+              </div>
+            </div>
+          )}
     </div>
   );
 }
@@ -3704,6 +3786,9 @@ function PartyLedger({ data, persist }) {
 
   const rentedItems = useMemo(() => {
     if (!partyId) return [];
+    // partyRentedItems already filters to current > 0; the ledger tab wants
+    // every item ever delivered (including fully-returned ones), so it
+    // recomputes the same delivered/returned pair without that filter.
     const itemIds = new Set();
     for (const c of data.deliveryChallans) {
       if (c.partyId !== partyId) continue;
@@ -3770,17 +3855,7 @@ function PartyLedger({ data, persist }) {
 
   const totals = useMemo(() => {
     if (!partyId) return null;
-    const partyInvoices = data.invoices.filter((i) => i.partyId === partyId);
-    const partyPayments = (data.payments || []).filter((p) => p.partyId === partyId);
-    const invoiced = round2(partyInvoices.reduce((s, i) => s + i.netTotal, 0));
-    const paid = round2(partyPayments.reduce((s, p) => s + p.amount, 0));
-    return {
-      invoiced,
-      brokenCharges: round2(partyInvoices.reduce((s, i) => s + (i.brokenTotal || 0), 0)),
-      invoiceCount: partyInvoices.length,
-      paid,
-      balanceDue: round2(invoiced - paid),
-    };
+    return partyLedgerTotals(data, partyId);
   }, [data, partyId]);
 
   const typeTagStyle = (type) => {
