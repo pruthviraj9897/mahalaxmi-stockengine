@@ -67,6 +67,15 @@ function loadPdfLibs() {
   return _pdfLibsPromise;
 }
 
+// Lazily loads JSZip, used to bundle multiple generated invoice PDFs into a
+// single downloadable .zip for the bulk invoice flow.
+let _jsZipPromise = null;
+function loadJSZip() {
+  if (_jsZipPromise) return _jsZipPromise;
+  _jsZipPromise = loadScript("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js", () => window.JSZip);
+  return _jsZipPromise;
+}
+
 // Renders `portalClass` (a .print-portal--* node already in the DOM, see
 // PrintPortal above) to a PDF and downloads it as `filename`. The node
 // normally sits off-screen with display:none (it's only ever meant to be
@@ -75,7 +84,22 @@ function loadPdfLibs() {
 async function exportPortalToPdf(portalClass, filename) {
   const node = document.querySelector("." + portalClass);
   if (!node) throw new Error("Print portal not found: " + portalClass);
+  const pdf = await renderNodeToPdf(node);
+  pdf.save(filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf");
+}
 
+// Same rendering as exportPortalToPdf, but returns the PDF as a Blob instead
+// of triggering a download — used when bundling several invoices into a zip
+// (see BulkInvoiceBuilder) rather than saving them one at a time.
+async function pdfBlobFromNode(node) {
+  const pdf = await renderNodeToPdf(node);
+  return pdf.output("blob");
+}
+
+// Core of the html2canvas → jsPDF pipeline, shared by exportPortalToPdf
+// (single download) and pdfBlobFromNode (zip bundling). Renders `node` —
+// normally an off-screen print-portal node — to a paginated A4 jsPDF object.
+async function renderNodeToPdf(node) {
   // Expand any scrollable table containers so the full table gets captured,
   // not just the scrolled viewport — same as the old print CSS did.
   const wraps = node.querySelectorAll(".table-wrap");
@@ -140,7 +164,7 @@ async function exportPortalToPdf(portalClass, filename) {
       firstPage = false;
     }
 
-    pdf.save(filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf");
+    return pdf;
   } finally {
     Object.assign(node.style, prevStyle);
     prevWrapStyles.forEach(({ el, maxHeight, overflow, overflowX, overflowY }) => {
@@ -1510,6 +1534,7 @@ export default function StockEngine({ session, onLogout }) {
     { id: "delivery", label: "Delivery Entry", icon: Truck },
     { id: "return", label: "Return Entry", icon: RotateCcw },
     { id: "invoice", label: "Create Invoice", icon: FileText },
+    { id: "bulkInvoice", label: "Bulk Invoice", icon: Users },
     { id: "archive", label: "Invoice Archive", icon: Archive },
     { id: "ledger", label: "Party Ledger", icon: History },
     { id: "expenses", label: "Expenses", icon: Wallet },
@@ -1605,6 +1630,7 @@ export default function StockEngine({ session, onLogout }) {
         {tab === "delivery" && <DeliveryEntry data={data} persist={persist} />}
         {tab === "return" && <ReturnEntry data={data} persist={persist} />}
         {tab === "invoice" && <InvoiceBuilder data={data} persist={persist} />}
+        {tab === "bulkInvoice" && <BulkInvoiceBuilder data={data} persist={persist} />}
         {tab === "archive" && <InvoiceArchive data={data} persist={persist} />}
         {tab === "ledger" && <PartyLedger data={data} persist={persist} />}
         {tab === "expenses" && <Expenses data={data} persist={persist} />}
@@ -3208,6 +3234,197 @@ function InvoiceBuilder({ data, persist }) {
   );
 }
 
+/* ---------------- Bulk Invoice ---------------- */
+// One billing window + invoice date, applied to every party at once (all
+// parties start selected; any can be unticked to skip them). Generates one
+// invoice per selected party with sequential invoice numbers, saves them all
+// in a single persist(), then renders + captures each as a PDF off-screen
+// and bundles the set into one .zip download.
+
+function BulkInvoiceBuilder({ data, persist }) {
+  const [billStart, setBillStart] = useState("");
+  const [billEnd, setBillEnd] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [excludedIds, setExcludedIds] = useState(() => new Set());
+  const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [captureInvoice, setCaptureInvoice] = useState(null); // invoice currently being rendered off-screen for PDF capture
+  const captureRef = useRef(null);
+
+  const hasWindow = Boolean(billStart && billEnd);
+
+  // Compute a preview for every party (billable or not) once a window is set.
+  const previews = useMemo(() => {
+    if (!hasWindow) return [];
+    return data.parties.map((p) => ({
+      party: p,
+      result: computeInvoiceLines(data, p.id, billStart, billEnd),
+    }));
+  }, [data, billStart, billEnd, hasWindow]);
+
+  const billable = previews.filter((pv) => pv.result.lines.length > 0);
+  const selected = billable.filter((pv) => !excludedIds.has(pv.party.id));
+  const skippedNoLines = previews.filter((pv) => pv.result.lines.length === 0);
+
+  const toggleParty = (id) => {
+    setExcludedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAll = () => setExcludedIds(new Set());
+  const selectNone = () => setExcludedIds(new Set(billable.map((pv) => pv.party.id)));
+
+  const generateAll = async () => {
+    if (generating || selected.length === 0) return;
+    setGenerating(true);
+    setProgress({ done: 0, total: selected.length });
+    try {
+      const JSZip = await loadJSZip();
+      const zip = new JSZip();
+      const now = new Date().toISOString();
+      let nextInvoiceNo = data.seq.invoice;
+
+      // Build every invoice record up front so numbering is sequential and
+      // predictable, independent of how long each PDF capture takes.
+      const newInvoices = selected.map(({ party, result }) => {
+        const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
+        const finalTotal = round2(gst.grandTotal - result.depositTotal);
+        const invoice = {
+          id: crypto.randomUUID(),
+          invoiceNo: nextInvoiceNo,
+          partyId: party.id,
+          billStart, billEnd, invoiceDate,
+          ...result,
+          gst, finalTotal,
+          createdAt: now, updatedAt: now,
+        };
+        nextInvoiceNo += 1;
+        return invoice;
+      });
+
+      // Render each invoice into the hidden capture portal one at a time,
+      // wait for paint, capture it to a PDF blob, and add it to the zip.
+      for (let i = 0; i < newInvoices.length; i++) {
+        const invoice = newInvoices[i];
+        setCaptureInvoice(invoice);
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const blob = await pdfBlobFromNode(captureRef.current);
+        const partyLabel = sanitizeForFilename(partyName(data, invoice.partyId));
+        zip.file(`${invoice.invoiceNo} - ${partyLabel}.pdf`, blob);
+        setProgress({ done: i + 1, total: newInvoices.length });
+      }
+
+      // Save all invoices in one go.
+      persist({
+        ...data,
+        invoices: [...data.invoices, ...newInvoices],
+        seq: { ...data.seq, invoice: nextInvoiceNo },
+      });
+
+      // Download the bundle.
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      const dateLabel = `${sanitizeForFilename(fmtDateDisplay(billStart))} to ${sanitizeForFilename(fmtDateDisplay(billEnd))}`;
+      a.href = url;
+      a.download = `Invoices - ${dateLabel}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      setBillStart("");
+      setBillEnd("");
+      setExcludedIds(new Set());
+    } catch (err) {
+      console.error("Bulk invoice generation failed:", err);
+      alert("Couldn't generate the invoices. Please try again.");
+    } finally {
+      setGenerating(false);
+      setCaptureInvoice(null);
+    }
+  };
+
+  return (
+    <div>
+      <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, then generate and download all invoices as a single zip." />
+
+      <Panel title="Billing Window">
+        <div style={styles.formRow}>
+          <Field label="Billing Start Date" type="date" value={billStart} onChange={setBillStart} />
+          <Field label="Billing End Date" type="date" value={billEnd} onChange={setBillEnd} />
+          <Field label="Invoice Date" type="date" value={invoiceDate} onChange={setInvoiceDate} />
+        </div>
+        {data.parties.length === 0 && <Notice text="Add at least one party in Party Master first." />}
+      </Panel>
+
+      {hasWindow && (
+        billable.length === 0 ? (
+          <Panel title="Preview"><Empty text="No party has any billable lines in this window — check the dates." /></Panel>
+        ) : (
+          <>
+            <Panel
+              title={`Parties to Invoice (${selected.length} of ${billable.length} selected)`}
+              hint="All billable parties are selected by default — untick any you want to leave out of this run."
+            >
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <button style={styles.ghostBtn} onClick={selectAll}>Select All</button>
+                <button style={styles.ghostBtn} onClick={selectNone}>Select None</button>
+              </div>
+              <div className="table-wrap">
+                <Table
+                  cols={["", "Party", "Lines", "Item Rent", "Net / Grand Total"]}
+                  rows={billable.map(({ party, result }) => {
+                    const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
+                    const finalTotal = round2(gst.grandTotal - result.depositTotal);
+                    const checked = !excludedIds.has(party.id);
+                    return [
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleParty(party.id)}
+                        style={{ width: 16, height: 16 }}
+                      />,
+                      `${party.code} — ${party.name}`,
+                      result.lines.length,
+                      result.itemRentTotal.toFixed(2),
+                      finalTotal.toFixed(2),
+                    ];
+                  })}
+                />
+              </div>
+              {skippedNoLines.length > 0 && (
+                <div style={{ ...styles.hint, marginTop: 10 }}>
+                  {skippedNoLines.length} part{skippedNoLines.length === 1 ? "y has" : "ies have"} no billable activity in this window and {skippedNoLines.length === 1 ? "is" : "are"} left out automatically: {skippedNoLines.map((pv) => pv.party.name).join(", ")}.
+                </div>
+              )}
+              <button
+                style={{ ...styles.primaryBtn, marginTop: 14 }}
+                disabled={generating || selected.length === 0}
+                onClick={generateAll}
+              >
+                <Archive size={15} />
+                {generating
+                  ? `Generating ${progress.done}/${progress.total}…`
+                  : `Generate & Download ${selected.length} Invoice${selected.length === 1 ? "" : "s"} (.zip)`}
+              </button>
+            </Panel>
+
+            {/* Hidden off-screen node used purely for PDF capture during
+                bulk generation — never shown on screen, only painted for
+                html2canvas to read. */}
+            <PrintPortal extraClass="print-portal--bulk-invoice" domRef={captureRef}>
+              {captureInvoice && <InvoiceSheet data={data} invoice={captureInvoice} />}
+            </PrintPortal>
+          </>
+        )
+      )}
+    </div>
+  );
+}
+
 /* ---------------- Invoice Archive ---------------- */
 
 function InvoiceArchive({ data, persist }) {
@@ -3293,31 +3510,13 @@ function InvoiceArchive({ data, persist }) {
   );
 }
 
-function InvoicePrintView({ data, invoice }) {
+// The actual invoice paper — letterhead, party/invoice header block, line
+// table, totals. Pulled out as its own component so it can be rendered both
+// on-screen (InvoicePrintView) and off-screen for single or bulk PDF capture
+// (BulkInvoiceBuilder), without duplicating the markup.
+function InvoiceSheet({ data, invoice }) {
   const company = data.company || DEFAULT_COMPANY;
-  const [exporting, setExporting] = useState(false);
-  // Generates the invoice PDF directly (see exportPortalToPdf's comment near
-  // the top of the file) and downloads it as "Party - StartDate - EndDate.pdf".
-  const handlePrint = async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      const party = data.parties.find((p) => p.id === invoice.partyId);
-      const partyLabel = sanitizeForFilename(party ? party.name : "Invoice");
-      const dateLabel = invoice.billStart && invoice.billEnd
-        ? `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} - ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`
-        : "";
-      const filename = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
-      await exportPortalToPdf("print-portal--invoice", filename);
-    } catch (err) {
-      console.error("PDF export failed:", err);
-      alert("Couldn't generate the PDF. Please try again.");
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const sheet = (
+  return (
     <div className="invoice-sheet" style={styles.invoiceSheet}>
           <div style={styles.invoiceLetterhead}>
             <div style={styles.invoiceCompany}>{company.name}</div>
@@ -3394,6 +3593,30 @@ function InvoicePrintView({ data, invoice }) {
           </div>
     </div>
   );
+}
+
+function InvoicePrintView({ data, invoice }) {
+  const [exporting, setExporting] = useState(false);
+  // Generates the invoice PDF directly (see exportPortalToPdf's comment near
+  // the top of the file) and downloads it as "Party - StartDate - EndDate.pdf".
+  const handlePrint = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const party = data.parties.find((p) => p.id === invoice.partyId);
+      const partyLabel = sanitizeForFilename(party ? party.name : "Invoice");
+      const dateLabel = invoice.billStart && invoice.billEnd
+        ? `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} - ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`
+        : "";
+      const filename = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
+      await exportPortalToPdf("print-portal--invoice", filename);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("Couldn't generate the PDF. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <Panel title={`Invoice #${invoice.invoiceNo}`}>
@@ -3402,8 +3625,8 @@ function InvoicePrintView({ data, invoice }) {
           <Printer size={15} /> {exporting ? "Generating…" : "Download PDF"}
         </button>
       </div>
-      {sheet}
-      <PrintPortal extraClass="print-portal--invoice">{sheet}</PrintPortal>
+      <InvoiceSheet data={data} invoice={invoice} />
+      <PrintPortal extraClass="print-portal--invoice"><InvoiceSheet data={data} invoice={invoice} /></PrintPortal>
     </Panel>
   );
 }
