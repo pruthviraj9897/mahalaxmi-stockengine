@@ -1439,24 +1439,6 @@ export default function StockEngine({ session, onLogout }) {
     link.href = href;
   }, []);
 
-  // ---- TEMPORARY DEBUG TOOL ---------------------------------------------
-  // Loads Eruda (an on-device DevTools console) so console errors/logs are
-  // visible directly on the phone — a small floating button appears in the
-  // bottom-right corner; tap it to open Console/Network/Elements tabs, just
-  // like desktop DevTools. Safe to leave in for now; remove this whole
-  // effect (and the "eruda" name won't appear anywhere else) once the
-  // mobile print/PDF issue is confirmed fixed and you don't need it anymore.
-  useEffect(() => {
-    if (window.eruda) return;
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/eruda@3/eruda.min.js";
-    script.onload = () => {
-      if (window.eruda) window.eruda.init();
-    };
-    document.body.appendChild(script);
-  }, []);
-  // ------------------------------------------------------------------------
-
   // Prevent the Enter key from triggering any Save/Add/Submit action.
   // Blocks Enter on inputs (stops form-submit behaviour) AND on buttons
   // (stops keyboard-click on a focused button). Users must click buttons
@@ -3127,6 +3109,7 @@ function InvoiceBuilder({ data, persist }) {
               {/* Line table — read-only or editable */}
               {!editMode ? (
                 <Table
+                  serial={false}
                   cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
                   rows={result.lines.map((l, i) => [
                     i + 1,
@@ -3636,6 +3619,7 @@ function InvoiceSheet({ data, invoice }) {
           <InvoicePartyHeader data={data} invoice={invoice} />
           <div style={{ marginTop: 6 }}>
             <Table
+              serial={false}
               cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
               rows={invoice.lines.map((l, i) => [
                 i + 1,
@@ -4550,15 +4534,17 @@ function StatCard({ label, value }) {
     </div>
   );
 }
-function Table({ cols, rows }) {
+function Table({ cols, rows, serial = true }) {
+  const allCols = serial ? ["#", ...cols] : cols;
+  const allRows = serial ? rows.map((r, i) => [i + 1, ...r]) : rows;
   return (
     <div className="table-wrap" style={styles.tableWrap}>
       <table style={styles.table}>
         <thead>
-          <tr>{cols.map((c, i) => <th key={i} style={styles.th}>{c}</th>)}</tr>
+          <tr>{allCols.map((c, i) => <th key={i} style={styles.th}>{c}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
+          {allRows.map((r, i) => (
             <tr key={i} style={styles.tr}>
               {r.map((cell, j) => <td key={j} style={styles.td}>{cell}</td>)}
             </tr>
