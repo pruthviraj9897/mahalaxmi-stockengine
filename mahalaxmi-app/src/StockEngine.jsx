@@ -3284,7 +3284,12 @@ function BulkInvoiceBuilder({ data, persist }) {
   const [excludedIds, setExcludedIds] = useState(() => new Set());
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [captureInvoice, setCaptureInvoice] = useState(null); // invoice currently being rendered off-screen for PDF capture
+  // Document currently rendered off-screen for PDF capture: either the
+  // invoice itself ({ kind: "invoice", invoice }) or its companion pending
+  // items/balance statement ({ kind: "summary", invoice, accountSummary }).
+  // Each party produces both, captured one at a time into the same portal
+  // node — see generateAll.
+  const [capture, setCapture] = useState(null);
   const captureRef = useRef(null);
 
   const hasWindow = Boolean(billStart && billEnd);
@@ -3351,16 +3356,25 @@ function BulkInvoiceBuilder({ data, persist }) {
         return { invoice, accountSummary };
       });
 
-      // Render each invoice into the hidden capture portal one at a time,
-      // wait for paint, capture it to a PDF blob, and add it to the zip.
+      // Render each party's two documents into the hidden capture portal one
+      // at a time, wait for paint, capture each to its own PDF blob, and add
+      // both to the zip — the invoice and its pending items/balance
+      // statement are separate PDFs, not sections of one PDF.
       for (let i = 0; i < built.length; i++) {
         const { invoice, accountSummary } = built[i];
-        setCaptureInvoice({ invoice, accountSummary });
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        const blob = await pdfBlobFromNode(captureRef.current);
         const partyLabel = sanitizeForFilename(partyName(data, invoice.partyId));
         const periodLabel = `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} to ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`;
-        zip.file(`${invoice.invoiceNo} - ${partyLabel} - ${periodLabel}.pdf`, blob);
+
+        setCapture({ kind: "invoice", invoice });
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const invoiceBlob = await pdfBlobFromNode(captureRef.current);
+        zip.file(`${invoice.invoiceNo} - ${partyLabel} - ${periodLabel}.pdf`, invoiceBlob);
+
+        setCapture({ kind: "summary", invoice, accountSummary });
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const summaryBlob = await pdfBlobFromNode(captureRef.current);
+        zip.file(`${invoice.invoiceNo} - ${partyLabel} - Pending Items & Balance.pdf`, summaryBlob);
+
         setProgress({ done: i + 1, total: built.length });
       }
 
@@ -3392,13 +3406,13 @@ function BulkInvoiceBuilder({ data, persist }) {
       alert("Couldn't generate the invoices. Please try again.");
     } finally {
       setGenerating(false);
-      setCaptureInvoice(null);
+      setCapture(null);
     }
   };
 
   return (
     <div>
-      <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, then generate and download all invoices as a single zip. Each invoice PDF also lists items still with that party and their running balance, pulled from the Party Ledger." />
+      <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, then generate and download all invoices as a single zip. Each party gets two PDFs: the invoice, and a companion statement listing items still with that party plus their running balance, pulled from the Party Ledger." />
 
       <Panel title="Billing Window">
         <div style={styles.formRow}>
@@ -3456,8 +3470,8 @@ function BulkInvoiceBuilder({ data, persist }) {
               >
                 <Archive size={15} />
                 {generating
-                  ? `Generating ${progress.done}/${progress.total}…`
-                  : `Generate & Download ${selected.length} Invoice${selected.length === 1 ? "" : "s"} (.zip)`}
+                  ? `Generating ${progress.done}/${progress.total} part${progress.total === 1 ? "y" : "ies"}…`
+                  : `Generate & Download ${selected.length} Part${selected.length === 1 ? "y" : "ies"} (${selected.length * 2} PDFs, .zip)`}
               </button>
             </Panel>
 
@@ -3465,8 +3479,10 @@ function BulkInvoiceBuilder({ data, persist }) {
                 bulk generation — never shown on screen, only painted for
                 html2canvas to read. */}
             <PrintPortal extraClass="print-portal--bulk-invoice" domRef={captureRef}>
-              {captureInvoice && (
-                <InvoiceSheet data={data} invoice={captureInvoice.invoice} accountSummary={captureInvoice.accountSummary} />
+              {capture && (
+                capture.kind === "invoice"
+                  ? <InvoiceSheet data={data} invoice={capture.invoice} />
+                  : <AccountSummarySheet data={data} invoice={capture.invoice} accountSummary={capture.accountSummary} />
               )}
             </PrintPortal>
           </>
@@ -3561,51 +3577,60 @@ function InvoiceArchive({ data, persist }) {
   );
 }
 
+// Letterhead block — company name/tagline/address, "TAX INVOICE" marker when
+// applicable. Shared by InvoiceSheet and AccountSummarySheet so the two
+// documents read as a matching pair.
+function InvoiceLetterhead({ data, invoice }) {
+  const company = data.company || DEFAULT_COMPANY;
+  return (
+    <div style={styles.invoiceLetterhead}>
+      <div style={styles.invoiceCompany}>{company.name}</div>
+      <div style={styles.invoiceTagline}>{company.tagline}</div>
+      <div style={styles.invoiceAddress}>{company.address} · {company.email}{company.gstin ? ` · GSTIN: ${company.gstin}` : ""}</div>
+      {invoice.gst?.applicable && <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>TAX INVOICE</div>}
+    </div>
+  );
+}
+
+// Party details (left) + invoice no./date/billing period (right) header row.
+// Shared by InvoiceSheet and AccountSummarySheet — see InvoiceLetterhead.
+function InvoicePartyHeader({ data, invoice }) {
+  const party = data.parties.find((p) => p.id === invoice.partyId);
+  const refs = party?.references?.filter(Boolean) || (party?.reference ? [party.reference] : []);
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
+      {/* LEFT — party details */}
+      <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, invoice.partyId)}</div>
+        {party?.address && <div><strong>Address:</strong> {party.address}</div>}
+        {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
+        {refs.length > 0 && <div><strong>Ref:</strong> {refs.join(", ")}</div>}
+        {invoice.gst?.applicable && (
+          <>
+            <div><strong>Party GSTIN:</strong> {party?.gstin || "—"}</div>
+            <div><strong>Tax Type:</strong> {invoice.gst.gstType === "IGST" ? "IGST" : "CGST + SGST"}</div>
+          </>
+        )}
+      </div>
+      {/* RIGHT — invoice no & date */}
+      <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
+        <div><strong>Invoice No.:</strong> {invoice.invoiceNo}</div>
+        <div><strong>Invoice Date:</strong> {fmtDateDisplay(invoice.invoiceDate)}</div>
+        <div><strong>Billing Period:</strong> {fmtDateDisplay(invoice.billStart)} → {fmtDateDisplay(invoice.billEnd)}</div>
+      </div>
+    </div>
+  );
+}
+
 // The actual invoice paper — letterhead, party/invoice header block, line
 // table, totals. Pulled out as its own component so it can be rendered both
 // on-screen (InvoicePrintView) and off-screen for single or bulk PDF capture
 // (BulkInvoiceBuilder), without duplicating the markup.
-// `accountSummary`, when passed, adds a "Pending Items & Balance" section
-// below the totals: items the party is still holding (not yet returned),
-// plus the running balance including this invoice. Only wired up for bulk
-// invoice generation for now — see BulkInvoiceBuilder.
-function InvoiceSheet({ data, invoice, accountSummary }) {
-  const company = data.company || DEFAULT_COMPANY;
+function InvoiceSheet({ data, invoice }) {
   return (
     <div className="invoice-sheet" style={styles.invoiceSheet}>
-          <div style={styles.invoiceLetterhead}>
-            <div style={styles.invoiceCompany}>{company.name}</div>
-            <div style={styles.invoiceTagline}>{company.tagline}</div>
-            <div style={styles.invoiceAddress}>{company.address} · {company.email}{company.gstin ? ` · GSTIN: ${company.gstin}` : ""}</div>
-            {invoice.gst?.applicable && <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>TAX INVOICE</div>}
-          </div>
-          {(() => {
-            const party = data.parties.find((p) => p.id === invoice.partyId);
-            const refs = party?.references?.filter(Boolean) || (party?.reference ? [party.reference] : []);
-            return (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
-                {/* LEFT — party details */}
-                <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, invoice.partyId)}</div>
-                  {party?.address && <div><strong>Address:</strong> {party.address}</div>}
-                  {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
-                  {refs.length > 0 && <div><strong>Ref:</strong> {refs.join(", ")}</div>}
-                  {invoice.gst?.applicable && (
-                    <>
-                      <div><strong>Party GSTIN:</strong> {party?.gstin || "—"}</div>
-                      <div><strong>Tax Type:</strong> {invoice.gst.gstType === "IGST" ? "IGST" : "CGST + SGST"}</div>
-                    </>
-                  )}
-                </div>
-                {/* RIGHT — invoice no & date */}
-                <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
-                  <div><strong>Invoice No.:</strong> {invoice.invoiceNo}</div>
-                  <div><strong>Invoice Date:</strong> {fmtDateDisplay(invoice.invoiceDate)}</div>
-                  <div><strong>Billing Period:</strong> {fmtDateDisplay(invoice.billStart)} → {fmtDateDisplay(invoice.billEnd)}</div>
-                </div>
-              </div>
-            );
-          })()}
+          <InvoiceLetterhead data={data} invoice={invoice} />
+          <InvoicePartyHeader data={data} invoice={invoice} />
           <div style={{ marginTop: 6 }}>
             <Table
               cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
@@ -3646,33 +3671,44 @@ function InvoiceSheet({ data, invoice, accountSummary }) {
               </>
             )}
           </div>
-          {accountSummary && (
-            <div style={{ marginTop: 22, paddingTop: 14, borderTop: `1px solid ${COLORS.border}` }}>
-              <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
-                Pending Items &amp; Balance
-              </div>
-              {accountSummary.pendingItems.length > 0 ? (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 11.5, fontWeight: 600, color: COLORS.muted, marginBottom: 4 }}>
-                    Items Currently With Party (Not Yet Returned)
-                  </div>
-                  <Table
-                    cols={["Item", "Qty Held"]}
-                    rows={accountSummary.pendingItems.map((r) => [itemName(data, r.itemId), r.current])}
-                  />
-                </div>
-              ) : (
-                <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
-                  No items currently pending return with this party.
-                </div>
-              )}
-              <div style={styles.totalsBox}>
-                <TotalRow label="Balance Due Before This Invoice" value={accountSummary.priorBalance} />
-                <TotalRow label="This Invoice Amount" value={accountSummary.thisInvoiceAmount} />
-                <TotalRow label="Total Payable Now" value={accountSummary.totalPayable} big />
-              </div>
-            </div>
-          )}
+    </div>
+  );
+}
+
+// Companion "Pending Items & Balance" statement — a standalone document
+// (own letterhead + party/invoice header, same as InvoiceSheet) rather than
+// a section tacked onto the invoice. Rendered as its own PDF, one per party,
+// alongside (not inside) that party's invoice PDF — see BulkInvoiceBuilder.
+// Shows items the party is still holding (not yet returned), plus the
+// running balance including this invoice.
+function AccountSummarySheet({ data, invoice, accountSummary }) {
+  return (
+    <div className="invoice-sheet" style={styles.invoiceSheet}>
+      <InvoiceLetterhead data={data} invoice={invoice} />
+      <InvoicePartyHeader data={data} invoice={invoice} />
+      <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+        Pending Items &amp; Balance
+      </div>
+      {accountSummary.pendingItems.length > 0 ? (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 11.5, fontWeight: 600, color: COLORS.muted, marginBottom: 4 }}>
+            Items Currently With Party (Not Yet Returned)
+          </div>
+          <Table
+            cols={["Item", "Qty Held"]}
+            rows={accountSummary.pendingItems.map((r) => [itemName(data, r.itemId), r.current])}
+          />
+        </div>
+      ) : (
+        <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
+          No items currently pending return with this party.
+        </div>
+      )}
+      <div style={styles.totalsBox}>
+        <TotalRow label="Balance Due Before This Invoice" value={accountSummary.priorBalance} />
+        <TotalRow label="This Invoice Amount" value={accountSummary.thisInvoiceAmount} />
+        <TotalRow label="Total Payable Now" value={accountSummary.totalPayable} big />
+      </div>
     </div>
   );
 }
