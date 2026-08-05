@@ -2234,14 +2234,16 @@ function Dashboard({ data }) {
 /* ---------------- Party Master ---------------- */
 
 function PartyMaster({ data, persist }) {
-  const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST", openingBalance: "" };
+  const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const add = () => {
     if (!form.name.trim()) return;
-    const payload = { ...form, openingBalance: Number(form.openingBalance) || 0 };
+    // Opening Balance is edited from the Party Ledger tab, not here — so it's
+    // deliberately left out of this payload to avoid overwriting it on every save.
+    const payload = { ...form };
     if (editingId) {
       persist({ ...data, parties: data.parties.map((p) => (p.id === editingId ? { ...p, ...payload } : p)) });
       setEditingId(null);
@@ -2267,7 +2269,6 @@ function PartyMaster({ data, persist }) {
       gstin: p.gstin || "",
       requiresGst: !!p.requiresGst,
       gstType: p.gstType || "CGST_SGST",
-      openingBalance: p.openingBalance ? String(p.openingBalance) : "",
     });
   };
   const cancelEdit = () => { setEditingId(null); setForm(blank); };
@@ -2351,18 +2352,6 @@ function PartyMaster({ data, persist }) {
             </>
           )}
         </div>
-        <div style={styles.formRow}>
-          <Field
-            label="Opening Balance (₹)"
-            type="number"
-            value={form.openingBalance}
-            placeholder="0"
-            onChange={(v) => setForm({ ...form, openingBalance: v })}
-          />
-          <div style={{ ...styles.hint, alignSelf: "flex-end", paddingBottom: 8 }}>
-            What this party already owed before starting on this system — added once, then invoices and payments run forward from it.
-          </div>
-        </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button style={styles.primaryBtn} onClick={add}>
             {editingId ? <><CheckCircle2 size={15} /> Save Changes</> : <><Plus size={15} /> Add Party</>}
@@ -2376,7 +2365,7 @@ function PartyMaster({ data, persist }) {
           <Empty text="No parties yet — add one above." />
         ) : (
           <Table
-            cols={["Code", "Name", "Site", "Phone", "References", "GST", "Opening Bal. (₹)", ""]}
+            cols={["Code", "Name", "Site", "Phone", "References", "GST", ""]}
             rows={data.parties.map((p) => [
               <span style={styles.codeTag}>{p.code}</span>,
               p.name,
@@ -2389,7 +2378,6 @@ function PartyMaster({ data, persist }) {
               p.requiresGst
                 ? <span style={styles.tinyTag}>{p.gstType === "IGST" ? "IGST 18%" : "CGST+SGST 18%"}</span>
                 : <span style={{ color: COLORS.muted, fontSize: 12 }}>—</span>,
-              Number(p.openingBalance || 0).toFixed(2),
               <div style={{ display: "flex", gap: 6 }}>
                 <button style={styles.ghostBtn} onClick={() => startEdit(p)}>Edit</button>
                 <ConfirmDelete
@@ -4217,6 +4205,25 @@ function PartyLedger({ data, persist }) {
     setPaymentForm(emptyPaymentForm());
   }, [partyId]);
 
+  // Opening Balance is edited right here, not in Party Master — kept in its
+  // own input, synced whenever the selected party (or their stored value)
+  // changes, so switching parties doesn't carry over a half-typed number.
+  const [openingBalanceInput, setOpeningBalanceInput] = useState("");
+  useEffect(() => {
+    setOpeningBalanceInput(party ? String(party.openingBalance ?? "") : "");
+  }, [partyId, party?.openingBalance]);
+
+  const openingBalanceDirty = party && Number(openingBalanceInput || 0) !== round2(Number(party.openingBalance) || 0);
+
+  const saveOpeningBalance = () => {
+    if (!partyId) return;
+    const value = Number(openingBalanceInput) || 0;
+    persist({
+      ...data,
+      parties: data.parties.map((p) => (p.id === partyId ? { ...p, openingBalance: value } : p)),
+    });
+  };
+
   // Which report (if any) is currently being turned into a PDF — used to
   // disable/relabel the triggering button so a second tap can't overlap it.
   const [exportingKey, setExportingKey] = useState(null);
@@ -4379,6 +4386,25 @@ function PartyLedger({ data, persist }) {
 
       {party && (
         <>
+          <Panel title="Opening Balance" hint="What this party already owed before starting on this system — carried forward into Balance Due below.">
+            <div style={styles.formRow}>
+              <Field
+                label="Opening Balance (₹)"
+                type="number"
+                value={openingBalanceInput}
+                placeholder="0"
+                onChange={setOpeningBalanceInput}
+              />
+              <button
+                style={{ ...styles.primaryBtn, alignSelf: "flex-end" }}
+                onClick={saveOpeningBalance}
+                disabled={!openingBalanceDirty}
+              >
+                <CheckCircle2 size={15} /> Save
+              </button>
+            </div>
+          </Panel>
+
           <div style={styles.statRow}>
             <StatCard label="Items currently rented" value={rentedItems.filter((r) => r.current > 0).length} />
             <StatCard label="Opening balance (₹)" value={totals.openingBalance.toFixed(2)} />
