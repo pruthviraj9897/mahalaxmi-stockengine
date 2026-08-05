@@ -1725,17 +1725,23 @@ function partyRentedItems(data, partyId) {
 // Running invoiced / paid / balance-due totals for a party, as of whatever
 // invoices currently exist in `data`. Shared by the Party Ledger tab and the
 // invoice "Account Summary" section so the numbers never drift apart.
+// Balance due starts from the party's Opening Balance (set once in Party
+// Master, e.g. what they owed before this system was in use) and runs
+// forward from there — openingBalance + invoiced − paid.
 function partyLedgerTotals(data, partyId) {
+  const party = data.parties.find((p) => p.id === partyId);
+  const openingBalance = round2(Number(party?.openingBalance) || 0);
   const partyInvoices = data.invoices.filter((i) => i.partyId === partyId);
   const partyPayments = (data.payments || []).filter((p) => p.partyId === partyId);
   const invoiced = round2(partyInvoices.reduce((s, i) => s + i.netTotal, 0));
   const paid = round2(partyPayments.reduce((s, p) => s + p.amount, 0));
   return {
+    openingBalance,
     invoiced,
     brokenCharges: round2(partyInvoices.reduce((s, i) => s + (i.brokenTotal || 0), 0)),
     invoiceCount: partyInvoices.length,
     paid,
-    balanceDue: round2(invoiced - paid),
+    balanceDue: round2(openingBalance + invoiced - paid),
   };
 }
 
@@ -2228,21 +2234,22 @@ function Dashboard({ data }) {
 /* ---------------- Party Master ---------------- */
 
 function PartyMaster({ data, persist }) {
-  const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST" };
+  const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST", openingBalance: "" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const add = () => {
     if (!form.name.trim()) return;
+    const payload = { ...form, openingBalance: Number(form.openingBalance) || 0 };
     if (editingId) {
-      persist({ ...data, parties: data.parties.map((p) => (p.id === editingId ? { ...p, ...form } : p)) });
+      persist({ ...data, parties: data.parties.map((p) => (p.id === editingId ? { ...p, ...payload } : p)) });
       setEditingId(null);
     } else {
       const code = uid("P", data.seq.party);
       persist({
         ...data,
-        parties: [...data.parties, { id: crypto.randomUUID(), code, ...form }],
+        parties: [...data.parties, { id: crypto.randomUUID(), code, ...payload }],
         seq: { ...data.seq, party: data.seq.party + 1 },
       });
     }
@@ -2260,6 +2267,7 @@ function PartyMaster({ data, persist }) {
       gstin: p.gstin || "",
       requiresGst: !!p.requiresGst,
       gstType: p.gstType || "CGST_SGST",
+      openingBalance: p.openingBalance ? String(p.openingBalance) : "",
     });
   };
   const cancelEdit = () => { setEditingId(null); setForm(blank); };
@@ -2343,6 +2351,18 @@ function PartyMaster({ data, persist }) {
             </>
           )}
         </div>
+        <div style={styles.formRow}>
+          <Field
+            label="Opening Balance (₹)"
+            type="number"
+            value={form.openingBalance}
+            placeholder="0"
+            onChange={(v) => setForm({ ...form, openingBalance: v })}
+          />
+          <div style={{ ...styles.hint, alignSelf: "flex-end", paddingBottom: 8 }}>
+            What this party already owed before starting on this system — added once, then invoices and payments run forward from it.
+          </div>
+        </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button style={styles.primaryBtn} onClick={add}>
             {editingId ? <><CheckCircle2 size={15} /> Save Changes</> : <><Plus size={15} /> Add Party</>}
@@ -2356,7 +2376,7 @@ function PartyMaster({ data, persist }) {
           <Empty text="No parties yet — add one above." />
         ) : (
           <Table
-            cols={["Code", "Name", "Site", "Phone", "References", "GST", ""]}
+            cols={["Code", "Name", "Site", "Phone", "References", "GST", "Opening Bal. (₹)", ""]}
             rows={data.parties.map((p) => [
               <span style={styles.codeTag}>{p.code}</span>,
               p.name,
@@ -2369,6 +2389,7 @@ function PartyMaster({ data, persist }) {
               p.requiresGst
                 ? <span style={styles.tinyTag}>{p.gstType === "IGST" ? "IGST 18%" : "CGST+SGST 18%"}</span>
                 : <span style={{ color: COLORS.muted, fontSize: 12 }}>—</span>,
+              Number(p.openingBalance || 0).toFixed(2),
               <div style={{ display: "flex", gap: 6 }}>
                 <button style={styles.ghostBtn} onClick={() => startEdit(p)}>Edit</button>
                 <ConfirmDelete
@@ -3330,11 +3351,21 @@ function BulkInvoiceBuilder({ data, persist }) {
   const [excludedIds, setExcludedIds] = useState(() => new Set());
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  // "select" — choose the billing window and which parties to include.
+  // "review" — inspect (and, if needed, edit) every selected party's
+  // invoice before anything is saved or downloaded, same idea as Create
+  // Invoice's edit mode but one card per party.
+  const [step, setStep] = useState("select");
+  // Manual per-party edits made during review, keyed by party id:
+  // { lines, transportOverride, depositOverride }. A party with no entry
+  // here just uses its auto-computed result untouched.
+  const [partyEdits, setPartyEdits] = useState({});
+  const [expandedPartyId, setExpandedPartyId] = useState(null);
   // Document currently rendered off-screen for PDF capture: either the
   // invoice itself ({ kind: "invoice", invoice }) or its companion pending
   // items/balance statement ({ kind: "summary", invoice, accountSummary }).
   // Each party produces both, captured one at a time into the same portal
-  // node — see generateAll.
+  // node — see confirmAndDownload.
   const [capture, setCapture] = useState(null);
   const captureRef = useRef(null);
 
@@ -3353,6 +3384,14 @@ function BulkInvoiceBuilder({ data, persist }) {
   const selected = billable.filter((pv) => !excludedIds.has(pv.party.id));
   const skippedNoLines = previews.filter((pv) => pv.result.lines.length === 0);
 
+  // Changing the billing window invalidates any in-progress review/edits —
+  // drop back to selection and start review fresh next time.
+  useEffect(() => {
+    setStep("select");
+    setPartyEdits({});
+    setExpandedPartyId(null);
+  }, [billStart, billEnd]);
+
   const toggleParty = (id) => {
     setExcludedIds((prev) => {
       const next = new Set(prev);
@@ -3363,7 +3402,109 @@ function BulkInvoiceBuilder({ data, persist }) {
   const selectAll = () => setExcludedIds(new Set());
   const selectNone = () => setExcludedIds(new Set(billable.map((pv) => pv.party.id)));
 
-  const generateAll = async () => {
+  const seededEdit = (result) => ({
+    lines: result.lines.map((l) => ({ ...l, qty: String(l.qty), rate: String(l.rate), days: String(l.days), amount: String(l.amount), feet: l.feet ? String(l.feet) : "" })),
+    transportOverride: "",
+    depositOverride: "",
+  });
+
+  // Move from selection into review — seed an editable line-copy for every
+  // currently selected party so review totals exactly match the
+  // auto-computed preview until the user actually changes something.
+  const goToReview = () => {
+    if (selected.length === 0) return;
+    setPartyEdits((prev) => {
+      const next = { ...prev };
+      selected.forEach(({ party, result }) => {
+        if (!next[party.id]) next[party.id] = seededEdit(result);
+      });
+      return next;
+    });
+    setStep("review");
+  };
+
+  const backToSelect = () => {
+    setStep("select");
+    setExpandedPartyId(null);
+  };
+
+  const editLineFor = (partyId, idx, patch) => {
+    setPartyEdits((prev) => {
+      const cur = prev[partyId];
+      if (!cur) return prev;
+      const lines = cur.lines.map((l, i) => {
+        if (i !== idx) return l;
+        const updated = { ...l, ...patch };
+        if (!("amount" in patch) && ("qty" in patch || "rate" in patch || "days" in patch || "feet" in patch)) {
+          const qty = Number(updated.qty) || 0;
+          const rate = Number(updated.rate) || 0;
+          const days = Number(updated.days) || 0;
+          const feet = Number(updated.feet) || 0;
+          updated.amount = String(round2(qty * rate * days * (feet || 1)));
+        }
+        return updated;
+      });
+      return { ...prev, [partyId]: { ...cur, lines } };
+    });
+  };
+  const addLineFor = (partyId) => {
+    setPartyEdits((prev) => {
+      const cur = prev[partyId];
+      if (!cur) return prev;
+      return { ...prev, [partyId]: { ...cur, lines: [...cur.lines, emptyInvoiceLine()] } };
+    });
+  };
+  const removeLineFor = (partyId, idx) => {
+    setPartyEdits((prev) => {
+      const cur = prev[partyId];
+      if (!cur) return prev;
+      return { ...prev, [partyId]: { ...cur, lines: cur.lines.filter((_, i) => i !== idx) } };
+    });
+  };
+  const setOverrideFor = (partyId, key, value) => {
+    setPartyEdits((prev) => {
+      const cur = prev[partyId];
+      if (!cur) return prev;
+      return { ...prev, [partyId]: { ...cur, [key]: value } };
+    });
+  };
+  const resetPartyEdit = (partyId, result) => {
+    setPartyEdits((prev) => ({ ...prev, [partyId]: seededEdit(result) }));
+  };
+
+  // Resolves the final billable figures for one party during review —
+  // either straight from the auto-computed result, or recomputed from that
+  // party's edited lines/overrides. Shared by the review-screen totals and
+  // confirmAndDownload so what the user sees is exactly what gets saved.
+  const resolvePartyInvoiceData = (party, result) => {
+    const edit = partyEdits[party.id];
+    if (!edit) {
+      const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
+      const finalTotal = round2(gst.grandTotal - result.depositTotal);
+      return { lines: result.lines, itemRentTotal: result.itemRentTotal, transportTotal: result.transportTotal, depositTotal: result.depositTotal, additionalCharges: result.additionalCharges, netTotal: result.netTotal, gst, finalTotal };
+    }
+    const itemRentTotal = round2(edit.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0));
+    const transportTotal = edit.transportOverride !== "" ? (Number(edit.transportOverride) || 0) : result.transportTotal;
+    const depositTotal = edit.depositOverride !== "" ? (Number(edit.depositOverride) || 0) : result.depositTotal;
+    const additionalCharges = transportTotal;
+    const taxable = round2(itemRentTotal + additionalCharges);
+    const netTotal = round2(taxable - depositTotal);
+    const cleanLines = edit.lines
+      .filter((l) => l.itemName && (Number(l.amount) !== 0 || Number(l.qty) > 0))
+      .map((l) => ({
+        ...l,
+        qty: Number(l.qty) || 0,
+        rate: Number(l.rate) || 0,
+        days: Number(l.days) || 0,
+        amount: Number(l.amount) || 0,
+        feet: l.feet ? Number(l.feet) : undefined,
+      }));
+    const gst = computeGst(party, taxable);
+    const finalTotal = round2(gst.grandTotal - depositTotal);
+    return { lines: cleanLines, itemRentTotal, transportTotal, depositTotal, additionalCharges, netTotal, gst, finalTotal };
+  };
+
+  const confirmAndDownload = async () => {
     if (generating || selected.length === 0) return;
     setGenerating(true);
     setProgress({ done: 0, total: selected.length });
@@ -3374,21 +3515,20 @@ function BulkInvoiceBuilder({ data, persist }) {
       let nextInvoiceNo = data.seq.invoice;
 
       // Build every invoice record up front so numbering is sequential and
-      // predictable, independent of how long each PDF capture takes. Each
-      // party's "prior balance" is read from `data` as it stands right now
-      // (before this run adds anything), so the PDF shows exactly what was
-      // owed walking in, plus this invoice, plus the items still with them —
-      // one clear number, not three things the party has to add up.
+      // predictable, independent of how long each PDF capture takes. Uses
+      // whatever the user confirmed in review — edited or auto-computed.
+      // Each party's "prior balance" is read from `data` as it stands right
+      // now (before this run adds anything), so the PDF shows exactly what
+      // was owed walking in, plus this invoice, plus the items still with
+      // them — one clear number, not three things the party has to add up.
       const built = selected.map(({ party, result }) => {
-        const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
-        const finalTotal = round2(gst.grandTotal - result.depositTotal);
+        const resolved = resolvePartyInvoiceData(party, result);
         const invoice = {
           id: crypto.randomUUID(),
           invoiceNo: nextInvoiceNo,
           partyId: party.id,
           billStart, billEnd, invoiceDate,
-          ...result,
-          gst, finalTotal,
+          ...resolved,
           createdAt: now, updatedAt: now,
         };
         nextInvoiceNo += 1;
@@ -3396,8 +3536,8 @@ function BulkInvoiceBuilder({ data, persist }) {
         const accountSummary = {
           pendingItems: partyRentedItems(data, party.id),
           priorBalance,
-          thisInvoiceAmount: finalTotal,
-          totalPayable: round2(priorBalance + finalTotal),
+          thisInvoiceAmount: resolved.finalTotal,
+          totalPayable: round2(priorBalance + resolved.finalTotal),
         };
         return { invoice, accountSummary };
       });
@@ -3447,6 +3587,9 @@ function BulkInvoiceBuilder({ data, persist }) {
       setBillStart("");
       setBillEnd("");
       setExcludedIds(new Set());
+      setPartyEdits({});
+      setStep("select");
+      setExpandedPartyId(null);
     } catch (err) {
       console.error("Bulk invoice generation failed:", err);
       alert("Couldn't generate the invoices. Please try again.");
@@ -3458,7 +3601,7 @@ function BulkInvoiceBuilder({ data, persist }) {
 
   return (
     <div>
-      <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, then generate and download all invoices as a single zip. Each party gets two PDFs: the invoice, and a companion statement listing items still with that party plus their running balance, pulled from the Party Ledger." />
+      <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, review (and edit if needed) each invoice, then generate and download all invoices as a single zip. Each party gets two PDFs: the invoice, and a companion statement listing items still with that party plus their running balance, pulled from the Party Ledger." />
 
       <Panel title="Billing Window">
         <div style={styles.formRow}>
@@ -3472,68 +3615,201 @@ function BulkInvoiceBuilder({ data, persist }) {
       {hasWindow && (
         billable.length === 0 ? (
           <Panel title="Preview"><Empty text="No party has any billable lines in this window — check the dates." /></Panel>
-        ) : (
-          <>
-            <Panel
-              title={`Parties to Invoice (${selected.length} of ${billable.length} selected)`}
-              hint="All billable parties are selected by default — untick any you want to leave out of this run."
+        ) : step === "select" ? (
+          <Panel
+            title={`Parties to Invoice (${selected.length} of ${billable.length} selected)`}
+            hint="All billable parties are selected by default — untick any you want to leave out of this run."
+          >
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button style={styles.ghostBtn} onClick={selectAll}>Select All</button>
+              <button style={styles.ghostBtn} onClick={selectNone}>Select None</button>
+            </div>
+            <div className="table-wrap">
+              <Table
+                cols={["", "Party", "Lines", "Item Rent", "Net / Grand Total"]}
+                rows={billable.map(({ party, result }) => {
+                  const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
+                  const finalTotal = round2(gst.grandTotal - result.depositTotal);
+                  const checked = !excludedIds.has(party.id);
+                  return [
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleParty(party.id)}
+                      style={{ width: 16, height: 16 }}
+                    />,
+                    `${party.code} — ${party.name}`,
+                    result.lines.length,
+                    result.itemRentTotal.toFixed(2),
+                    finalTotal.toFixed(2),
+                  ];
+                })}
+              />
+            </div>
+            {skippedNoLines.length > 0 && (
+              <div style={{ ...styles.hint, marginTop: 10 }}>
+                {skippedNoLines.length} part{skippedNoLines.length === 1 ? "y has" : "ies have"} no billable activity in this window and {skippedNoLines.length === 1 ? "is" : "are"} left out automatically: {skippedNoLines.map((pv) => pv.party.name).join(", ")}.
+              </div>
+            )}
+            <button
+              style={{ ...styles.primaryBtn, marginTop: 14 }}
+              disabled={selected.length === 0}
+              onClick={goToReview}
             >
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <button style={styles.ghostBtn} onClick={selectAll}>Select All</button>
-                <button style={styles.ghostBtn} onClick={selectNone}>Select None</button>
-              </div>
-              <div className="table-wrap">
-                <Table
-                  cols={["", "Party", "Lines", "Item Rent", "Net / Grand Total"]}
-                  rows={billable.map(({ party, result }) => {
-                    const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
-                    const finalTotal = round2(gst.grandTotal - result.depositTotal);
-                    const checked = !excludedIds.has(party.id);
-                    return [
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleParty(party.id)}
-                        style={{ width: 16, height: 16 }}
-                      />,
-                      `${party.code} — ${party.name}`,
-                      result.lines.length,
-                      result.itemRentTotal.toFixed(2),
-                      finalTotal.toFixed(2),
-                    ];
-                  })}
-                />
-              </div>
-              {skippedNoLines.length > 0 && (
-                <div style={{ ...styles.hint, marginTop: 10 }}>
-                  {skippedNoLines.length} part{skippedNoLines.length === 1 ? "y has" : "ies have"} no billable activity in this window and {skippedNoLines.length === 1 ? "is" : "are"} left out automatically: {skippedNoLines.map((pv) => pv.party.name).join(", ")}.
-                </div>
-              )}
-              <button
-                style={{ ...styles.primaryBtn, marginTop: 14 }}
-                disabled={generating || selected.length === 0}
-                onClick={generateAll}
-              >
-                <Archive size={15} />
-                {generating
-                  ? `Generating ${progress.done}/${progress.total} part${progress.total === 1 ? "y" : "ies"}…`
-                  : `Generate & Download ${selected.length} Part${selected.length === 1 ? "y" : "ies"} (${selected.length * 2} PDFs, .zip)`}
-              </button>
-            </Panel>
+              <FileText size={15} /> Review {selected.length} Invoice{selected.length === 1 ? "" : "s"} Before Download
+            </button>
+          </Panel>
+        ) : (
+          <Panel
+            title={`Review ${selected.length} Invoice${selected.length === 1 ? "" : "s"}`}
+            hint="Expand a party to edit its lines, transport, or deposit — same as Create Invoice's edit mode. Nothing is saved or downloaded until you confirm below."
+          >
+            <button style={{ ...styles.ghostBtn, marginBottom: 12 }} onClick={backToSelect}>
+              <X size={13} /> Back to Party Selection
+            </button>
 
-            {/* Hidden off-screen node used purely for PDF capture during
-                bulk generation — never shown on screen, only painted for
-                html2canvas to read. */}
-            <PrintPortal extraClass="print-portal--bulk-invoice" domRef={captureRef}>
-              {capture && (
-                capture.kind === "invoice"
-                  ? <InvoiceSheet data={data} invoice={capture.invoice} />
-                  : <AccountSummarySheet data={data} invoice={capture.invoice} accountSummary={capture.accountSummary} />
-              )}
-            </PrintPortal>
-          </>
+            {selected.map(({ party, result }) => {
+              const edit = partyEdits[party.id];
+              const resolved = resolvePartyInvoiceData(party, result);
+              const isExpanded = expandedPartyId === party.id;
+              const isEdited = !!edit && (
+                edit.transportOverride !== "" || edit.depositOverride !== "" ||
+                JSON.stringify(edit.lines.map((l) => [l.itemName, l.qty, l.rate, l.days, l.amount, l.feet])) !==
+                JSON.stringify(result.lines.map((l) => [l.itemName, String(l.qty), String(l.rate), String(l.days), String(l.amount), l.feet ? String(l.feet) : ""]))
+              );
+
+              return (
+                <div key={party.id} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 8, marginBottom: 10, overflow: "hidden" }}>
+                  <div
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "10px 14px", background: COLORS.bg, cursor: "pointer", flexWrap: "wrap", gap: 8,
+                    }}
+                    onClick={() => setExpandedPartyId(isExpanded ? null : party.id)}
+                  >
+                    <span style={{ fontWeight: 700, fontSize: 13.5, fontFamily: "system-ui, sans-serif", color: COLORS.ink }}>
+                      {isExpanded ? "▾" : "▸"} {party.code} — {party.name}{" "}
+                      {isEdited && <span style={{ ...styles.tinyTag, background: "#fff3cd", color: "#856404" }}>edited</span>}
+                    </span>
+                    <span style={{ fontSize: 12.5, fontFamily: "system-ui, sans-serif", color: COLORS.muted }}>
+                      {resolved.lines.length} line{resolved.lines.length === 1 ? "" : "s"} · Item Rent ₹{resolved.itemRentTotal.toFixed(2)} · <strong style={{ color: COLORS.ink }}>Total ₹{resolved.finalTotal.toFixed(2)}</strong>
+                    </span>
+                  </div>
+
+                  {isExpanded && (
+                    <div style={{ padding: 14 }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ overflowX: "auto" }}>
+                        <div className="line-header-row" style={{ ...styles.lineHeaderRow, gap: 6 }}>
+                          <span style={{ width: 24, flexShrink: 0 }}>#</span>
+                          <span style={{ flex: 3, minWidth: 110 }}>Item Name</span>
+                          <span style={{ flex: 1, minWidth: 55 }}>Qty</span>
+                          <span style={{ flex: 1, minWidth: 55 }}>Rate</span>
+                          <span style={{ flex: 1, minWidth: 55 }}>Feet</span>
+                          <span style={{ flex: 1, minWidth: 70 }}>Start</span>
+                          <span style={{ flex: 1, minWidth: 70 }}>End</span>
+                          <span style={{ flex: 1, minWidth: 50 }}>Days</span>
+                          <span style={{ flex: 1, minWidth: 75 }}>Amount (₹)</span>
+                          <span style={{ width: 32, flexShrink: 0 }} />
+                        </div>
+                        {(edit?.lines || []).map((l, idx) => (
+                          <div key={idx} style={{ ...styles.lineRow, gap: 6, alignItems: "center", marginBottom: 6 }}>
+                            <span style={{ width: 24, flexShrink: 0, fontSize: 12, color: COLORS.muted }}>{idx + 1}</span>
+                            <input style={{ ...styles.input, flex: 3, minWidth: 110 }} placeholder="Item description" value={l.itemName} onChange={(e) => editLineFor(party.id, idx, { itemName: e.target.value })} />
+                            <input style={{ ...styles.input, flex: 1, minWidth: 55 }} type="number" placeholder="Qty" value={l.qty} onChange={(e) => editLineFor(party.id, idx, { qty: e.target.value })} />
+                            <input style={{ ...styles.input, flex: 1, minWidth: 55 }} type="number" placeholder="Rate" value={l.rate} onChange={(e) => editLineFor(party.id, idx, { rate: e.target.value })} />
+                            <input style={{ ...styles.input, flex: 1, minWidth: 55 }} type="number" placeholder="Ft (opt)" value={l.feet} onChange={(e) => editLineFor(party.id, idx, { feet: e.target.value })} />
+                            <input style={{ ...styles.input, flex: 1, minWidth: 70 }} type="date" value={l.start} onChange={(e) => editLineFor(party.id, idx, { start: e.target.value })} />
+                            <input style={{ ...styles.input, flex: 1, minWidth: 70 }} type="date" value={l.end} onChange={(e) => editLineFor(party.id, idx, { end: e.target.value })} />
+                            <input style={{ ...styles.input, flex: 1, minWidth: 50 }} type="number" placeholder="Days" value={l.days} onChange={(e) => editLineFor(party.id, idx, { days: e.target.value })} />
+                            <input style={{ ...styles.input, flex: 1, minWidth: 75, fontWeight: 600 }} type="number" placeholder="Amount" value={l.amount} onChange={(e) => editLineFor(party.id, idx, { amount: e.target.value })} />
+                            <button style={{ ...styles.iconBtn, flexShrink: 0 }} onClick={() => removeLineFor(party.id, idx)} title="Remove line"><Trash2 size={13} /></button>
+                          </div>
+                        ))}
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button style={styles.ghostBtn} onClick={() => addLineFor(party.id)}><Plus size={13} /> Add Row</button>
+                          <button style={styles.ghostBtn} onClick={() => resetPartyEdit(party.id, result)}><X size={13} /> Reset to Auto-Calculated</button>
+                        </div>
+
+                        <div style={{ marginTop: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                          <Field
+                            label={`Transport Charge (auto: ₹${result.transportTotal.toFixed(2)})`}
+                            type="number"
+                            value={edit?.transportOverride ?? ""}
+                            onChange={(v) => setOverrideFor(party.id, "transportOverride", v)}
+                            placeholder={String(result.transportTotal)}
+                          />
+                          <Field
+                            label={`Deposit Deduction (auto: ₹${result.depositTotal.toFixed(2)})`}
+                            type="number"
+                            value={edit?.depositOverride ?? ""}
+                            onChange={(v) => setOverrideFor(party.id, "depositOverride", v)}
+                            placeholder={String(result.depositTotal)}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={styles.totalsBox}>
+                        <TotalRow label="Item Rent Amount" value={resolved.itemRentTotal} />
+                        <TotalRow label="Transport Charge" value={resolved.transportTotal} />
+                        {resolved.gst.applicable ? (
+                          <>
+                            <TotalRow label="Taxable Value" value={resolved.gst.taxableValue} bold />
+                            {resolved.gst.gstType === "IGST" ? (
+                              <TotalRow label={`IGST @ ${resolved.gst.rate}%`} value={resolved.gst.igst} />
+                            ) : (
+                              <>
+                                <TotalRow label={`CGST @ ${resolved.gst.rate / 2}%`} value={resolved.gst.cgst} />
+                                <TotalRow label={`SGST @ ${resolved.gst.rate / 2}%`} value={resolved.gst.sgst} />
+                              </>
+                            )}
+                            <TotalRow label="Deposit (deducted)" value={-resolved.depositTotal} />
+                            <TotalRow label="Grand Total (incl. GST)" value={resolved.finalTotal} big />
+                          </>
+                        ) : (
+                          <>
+                            <TotalRow label="Deposit (deducted)" value={-resolved.depositTotal} />
+                            <TotalRow label="Net Total" value={resolved.netTotal} big />
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div style={{ ...styles.totalsBox, marginTop: 4 }}>
+              <TotalRow
+                label="Grand Total — All Selected Parties"
+                value={selected.reduce((s, { party, result }) => s + resolvePartyInvoiceData(party, result).finalTotal, 0)}
+                big
+              />
+            </div>
+
+            <button
+              style={{ ...styles.primaryBtn, marginTop: 14 }}
+              disabled={generating || selected.length === 0}
+              onClick={confirmAndDownload}
+            >
+              <Archive size={15} />
+              {generating
+                ? `Generating ${progress.done}/${progress.total} part${progress.total === 1 ? "y" : "ies"}…`
+                : `Confirm & Download ${selected.length} Part${selected.length === 1 ? "y" : "ies"} (${selected.length * 2} PDFs, .zip)`}
+            </button>
+          </Panel>
         )
       )}
+
+      {/* Hidden off-screen node used purely for PDF capture during bulk
+          generation — never shown on screen, only painted for html2canvas
+          to read. */}
+      <PrintPortal extraClass="print-portal--bulk-invoice" domRef={captureRef}>
+        {capture && (
+          capture.kind === "invoice"
+            ? <InvoiceSheet data={data} invoice={capture.invoice} />
+            : <AccountSummarySheet data={data} invoice={capture.invoice} accountSummary={capture.accountSummary} />
+        )}
+      </PrintPortal>
     </div>
   );
 }
@@ -3545,6 +3821,8 @@ function InvoiceArchive({ data, persist }) {
   const [confirmVoidId, setConfirmVoidId] = useState(null);
   const [sortBy, setSortBy] = useState("date"); // "date" | "updated"
   const [filterPartyId, setFilterPartyId] = useState("");
+  // Months the user has manually collapsed — everything starts expanded.
+  const [collapsedMonths, setCollapsedMonths] = useState(() => new Set());
   const selected = data.invoices.find((i) => i.id === selectedId);
 
   const voidInvoice = (id) => {
@@ -3565,9 +3843,64 @@ function InvoiceArchive({ data, persist }) {
     return list;
   }, [data.invoices, sortBy, filterPartyId]);
 
+  // Segregate the (already sorted) list into month buckets keyed off each
+  // invoice's Invoice Date, most recent month first, so a growing archive
+  // reads as "August 2026", "July 2026", ... rather than one long table.
+  const monthGroups = useMemo(() => {
+    const map = new Map();
+    for (const inv of sortedInvoices) {
+      const d = new Date(inv.invoiceDate);
+      const key = isNaN(d.getTime()) ? "unknown" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(inv);
+    }
+    return [...map.entries()]
+      .sort((a, b) => (a[0] === "unknown" ? 1 : b[0] === "unknown" ? -1 : b[0].localeCompare(a[0])))
+      .map(([key, invoices]) => {
+        let label = "Undated";
+        if (key !== "unknown") {
+          const [y, m] = key.split("-");
+          label = new Date(Number(y), Number(m) - 1, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
+        }
+        return { key, label, invoices };
+      });
+  }, [sortedInvoices]);
+
+  const toggleMonth = (key) => {
+    setCollapsedMonths((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const invoiceRow = (inv) => [
+    inv.invoiceNo,
+    fmtDateDisplay(inv.invoiceDate),
+    partyName(data, inv.partyId),
+    Number(inv.itemRentTotal || 0).toFixed(2),
+    Number(inv.additionalCharges || 0).toFixed(2),
+    inv.gst?.applicable
+      ? <span style={styles.tinyTag}>{inv.gst.gstType === "IGST" ? "IGST" : "CGST+SGST"}</span>
+      : <span style={{ color: COLORS.muted, fontSize: 12 }}>—</span>,
+    <strong>{Number((inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal) || 0).toFixed(2)}</strong>,
+    confirmVoidId === inv.id ? (
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Void this invoice?</span>
+        <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => voidInvoice(inv.id)} title="Confirm void"><CheckCircle2 size={14} /></button>
+        <button style={styles.iconBtn} onClick={() => setConfirmVoidId(null)} title="Cancel"><X size={14} /></button>
+      </div>
+    ) : (
+      <div style={{ display: "flex", gap: 6 }}>
+        <button style={styles.ghostBtn} onClick={() => setSelectedId(inv.id)}><Printer size={13} /> View</button>
+        <button style={styles.iconBtn} onClick={() => setConfirmVoidId(inv.id)} title="Void invoice"><Ban size={14} /></button>
+      </div>
+    ),
+  ];
+
   return (
     <div>
-      <PageHeader title="Invoice Archive" subtitle="Every finalized invoice, saved permanently as a snapshot." />
+      <PageHeader title="Invoice Archive" subtitle="Every finalized invoice, saved permanently as a snapshot — grouped month by month." />
       <Panel title={`Invoices (${sortedInvoices.length}${filterPartyId ? ` of ${data.invoices.length}` : ""})`}>
         {data.invoices.length === 0 ? (
           <Empty text="No invoices finalized yet — create one in Create Invoice." />
@@ -3588,32 +3921,40 @@ function InvoiceArchive({ data, persist }) {
             {sortedInvoices.length === 0 ? (
               <Empty text="No invoices for this party." />
             ) : (
-          <Table
-            cols={["Invoice No.", "Date", "Party", "Item Rent", "Additional Charges", "GST", "Total", ""]}
-            rows={sortedInvoices.map((inv) => [
-              inv.invoiceNo,
-              fmtDateDisplay(inv.invoiceDate),
-              partyName(data, inv.partyId),
-              Number(inv.itemRentTotal || 0).toFixed(2),
-              Number(inv.additionalCharges || 0).toFixed(2),
-              inv.gst?.applicable
-                ? <span style={styles.tinyTag}>{inv.gst.gstType === "IGST" ? "IGST" : "CGST+SGST"}</span>
-                : <span style={{ color: COLORS.muted, fontSize: 12 }}>—</span>,
-              <strong>{Number((inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal) || 0).toFixed(2)}</strong>,
-              confirmVoidId === inv.id ? (
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Void this invoice?</span>
-                  <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => voidInvoice(inv.id)} title="Confirm void"><CheckCircle2 size={14} /></button>
-                  <button style={styles.iconBtn} onClick={() => setConfirmVoidId(null)} title="Cancel"><X size={14} /></button>
-                </div>
-              ) : (
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button style={styles.ghostBtn} onClick={() => setSelectedId(inv.id)}><Printer size={13} /> View</button>
-                  <button style={styles.iconBtn} onClick={() => setConfirmVoidId(inv.id)} title="Void invoice"><Ban size={14} /></button>
-                </div>
-              ),
-            ])}
-          />
+              monthGroups.map((group) => {
+                const collapsed = collapsedMonths.has(group.key);
+                const groupTotal = group.invoices.reduce(
+                  (s, inv) => s + Number((inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal) || 0),
+                  0
+                );
+                return (
+                  <div key={group.key} style={{ marginBottom: 16 }}>
+                    <button
+                      onClick={() => toggleMonth(group.key)}
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
+                        background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                        padding: "9px 14px", marginBottom: collapsed ? 0 : 8, cursor: "pointer",
+                        fontFamily: "system-ui, sans-serif",
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, fontSize: 13.5, color: COLORS.ink }}>
+                        {collapsed ? "▸" : "▾"} {group.label}{" "}
+                        <span style={{ fontWeight: 400, color: COLORS.muted, fontSize: 12 }}>
+                          ({group.invoices.length} invoice{group.invoices.length === 1 ? "" : "s"})
+                        </span>
+                      </span>
+                      <span style={{ fontWeight: 600, fontSize: 12.5, color: COLORS.muted }}>Total: ₹{groupTotal.toFixed(2)}</span>
+                    </button>
+                    {!collapsed && (
+                      <Table
+                        cols={["Invoice No.", "Date", "Party", "Item Rent", "Additional Charges", "GST", "Total", ""]}
+                        rows={group.invoices.map(invoiceRow)}
+                      />
+                    )}
+                  </div>
+                );
+              })
             )}
           </>
         )}
@@ -3762,8 +4103,37 @@ function AccountSummarySheet({ data, invoice, accountSummary }) {
 
 function InvoicePrintView({ data, invoice }) {
   const [exporting, setExporting] = useState(false);
-  // Generates the invoice PDF directly (see exportPortalToPdf's comment near
-  // the top of the file) and downloads it as "Party - StartDate - EndDate.pdf".
+  // Which document is currently painted into the off-screen capture portal —
+  // same two-pass pattern as BulkInvoiceBuilder ("invoice" then "summary")
+  // so a single invoice download bundles its companion Pending Items &
+  // Balance statement too, exactly like the bulk flow does per party.
+  const [capture, setCapture] = useState(null);
+  const captureRef = useRef(null);
+
+  // Companion "Pending Items & Balance" data for this invoice's party.
+  // Balance is computed excluding this invoice itself, so the statement
+  // reads "what was owed before this invoice, this invoice, total now" —
+  // same shape as the bulk-invoice companion statement.
+  const accountSummary = useMemo(() => {
+    const party = data.parties.find((p) => p.id === invoice.partyId);
+    const openingBalance = round2(Number(party?.openingBalance) || 0);
+    const partyInvoices = data.invoices.filter((i) => i.partyId === invoice.partyId && i.id !== invoice.id);
+    const partyPayments = (data.payments || []).filter((p) => p.partyId === invoice.partyId);
+    const invoiced = round2(partyInvoices.reduce((s, i) => s + i.netTotal, 0));
+    const paid = round2(partyPayments.reduce((s, p) => s + p.amount, 0));
+    const priorBalance = round2(openingBalance + invoiced - paid);
+    const thisInvoiceAmount = invoice.finalTotal ?? invoice.netTotal;
+    return {
+      pendingItems: partyRentedItems(data, invoice.partyId),
+      priorBalance,
+      thisInvoiceAmount,
+      totalPayable: round2(priorBalance + thisInvoiceAmount),
+    };
+  }, [data, invoice]);
+
+  // Generates the invoice PDF and its Pending Items & Balance companion,
+  // then bundles both into one .zip download — mirrors Bulk Invoice's
+  // per-party output (invoice PDF + statement PDF) for a single invoice.
   const handlePrint = async () => {
     if (exporting) return;
     setExporting(true);
@@ -3773,13 +4143,36 @@ function InvoicePrintView({ data, invoice }) {
       const dateLabel = invoice.billStart && invoice.billEnd
         ? `${sanitizeForFilename(fmtDateDisplay(invoice.billStart))} - ${sanitizeForFilename(fmtDateDisplay(invoice.billEnd))}`
         : "";
-      const filename = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
-      await exportPortalToPdf("print-portal--invoice", filename);
+      const baseLabel = dateLabel ? `${partyLabel} - ${dateLabel}` : partyLabel;
+
+      const JSZip = await loadJSZip();
+      const zip = new JSZip();
+
+      setCapture({ kind: "invoice" });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const invoiceBlob = await pdfBlobFromNode(captureRef.current);
+      zip.file(`${baseLabel}.pdf`, invoiceBlob);
+
+      setCapture({ kind: "summary" });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const summaryBlob = await pdfBlobFromNode(captureRef.current);
+      zip.file(`${baseLabel} - Pending Items & Balance.pdf`, summaryBlob);
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${baseLabel}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error("PDF export failed:", err);
       alert("Couldn't generate the PDF. Please try again.");
     } finally {
       setExporting(false);
+      setCapture(null);
     }
   };
 
@@ -3787,11 +4180,19 @@ function InvoicePrintView({ data, invoice }) {
     <Panel title={`Invoice #${invoice.invoiceNo}`}>
       <div className="no-print" style={{ marginBottom: 14 }}>
         <button style={styles.primaryBtn} disabled={exporting} onClick={handlePrint}>
-          <Printer size={15} /> {exporting ? "Generating…" : "Download PDF"}
+          <Printer size={15} /> {exporting ? "Generating…" : "Download PDF (Invoice + Pending Items & Balance)"}
         </button>
       </div>
       <InvoiceSheet data={data} invoice={invoice} />
-      <PrintPortal extraClass="print-portal--invoice"><InvoiceSheet data={data} invoice={invoice} /></PrintPortal>
+      {/* Off-screen node used purely for PDF capture — never shown, only
+          painted for html2canvas to read. See handlePrint above. */}
+      <PrintPortal extraClass="print-portal--invoice" domRef={captureRef}>
+        {capture && (
+          capture.kind === "invoice"
+            ? <InvoiceSheet data={data} invoice={invoice} />
+            : <AccountSummarySheet data={data} invoice={invoice} accountSummary={accountSummary} />
+        )}
+      </PrintPortal>
     </Panel>
   );
 }
@@ -3933,8 +4334,18 @@ function PartyLedger({ data, persist }) {
         amount: p.amount,
       });
     }
+    const openingBalance = round2(Number(party?.openingBalance) || 0);
+    if (openingBalance !== 0) {
+      events.push({
+        type: "opening",
+        date: "1900-01-01", // sorts to the very bottom regardless of other dates
+        label: "Opening Balance",
+        detail: "Carried over from before this system was in use",
+        amount: openingBalance,
+      });
+    }
     return events.sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [data, partyId]);
+  }, [data, partyId, party]);
 
   const totals = useMemo(() => {
     if (!partyId) return null;
@@ -3945,6 +4356,7 @@ function PartyLedger({ data, persist }) {
     if (type === "invoice") return { ...styles.tinyTag, background: "#eaf5ea", color: "#2e7d32" };
     if (type === "return") return { ...styles.tinyTag, background: "#fbeceb", color: COLORS.danger };
     if (type === "payment") return { ...styles.tinyTag, background: "#e6f0fb", color: "#1d5fa8" };
+    if (type === "opening") return { ...styles.tinyTag, background: "#fff3cd", color: "#856404" };
     return styles.tinyTag;
   };
 
@@ -3969,6 +4381,7 @@ function PartyLedger({ data, persist }) {
         <>
           <div style={styles.statRow}>
             <StatCard label="Items currently rented" value={rentedItems.filter((r) => r.current > 0).length} />
+            <StatCard label="Opening balance (₹)" value={totals.openingBalance.toFixed(2)} />
             <StatCard label="Invoices raised" value={totals.invoiceCount} />
             <StatCard label="Total invoiced (₹)" value={totals.invoiced.toFixed(2)} />
             <StatCard label="Paid (₹)" value={totals.paid.toFixed(2)} />
@@ -4076,7 +4489,7 @@ function PartyLedger({ data, persist }) {
                     <Table
                       cols={["Date", "Type", "Reference", "Details", "Amount"]}
                       rows={timeline.map((e) => [
-                        fmtDateDisplay(e.date),
+                        e.type === "opening" ? "—" : fmtDateDisplay(e.date),
                         <em style={typeTagStyle(e.type)}>{e.type}</em>,
                         e.label,
                         e.detail,
