@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Package, Truck, RotateCcw, Users, Boxes, LayoutGrid, Plus, Trash2, AlertCircle, CheckCircle2, FileText, Archive, Printer, Download, Upload, History, Pencil, X, Ban, Settings, LogOut, Menu, Wallet } from "lucide-react";
+import { Package, Truck, RotateCcw, Users, Boxes, LayoutGrid, Plus, Trash2, AlertCircle, CheckCircle2, FileText, Archive, Printer, Download, Upload, History, Pencil, X, Ban, Settings, LogOut, Menu, Wallet, Receipt } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STORAGE_KEY = "mlx-stockengine-v1";
@@ -1567,6 +1567,7 @@ export default function StockEngine({ session, onLogout }) {
     { id: "bulkInvoice", label: "Bulk Invoice", icon: Users },
     { id: "archive", label: "Invoice Archive", icon: Archive },
     { id: "ledger", label: "Party Ledger", icon: History },
+    { id: "balances", label: "Party Balances", icon: Receipt },
     { id: "expenses", label: "Expenses", icon: Wallet },
     { id: "recyclebin", label: "Recycle Bin", icon: Trash2 },
     { id: "backup", label: "Backup & Restore", icon: Download },
@@ -1678,6 +1679,7 @@ export default function StockEngine({ session, onLogout }) {
         {tab === "bulkInvoice" && <BulkInvoiceBuilder data={data} persist={persist} />}
         {tab === "archive" && <InvoiceArchive data={data} persist={persist} />}
         {tab === "ledger" && <PartyLedger data={data} persist={persist} />}
+        {tab === "balances" && <PartyBalances data={data} />}
         {tab === "expenses" && <Expenses data={data} persist={persist} />}
         {tab === "recyclebin" && <RecycleBin data={data} persist={persist} />}
       </main>
@@ -4549,6 +4551,159 @@ function TotalRow({ label, value, bold, big }) {
     <div style={{ ...styles.totalRow, ...(big ? styles.totalRowBig : {}) }}>
       <span style={{ fontWeight: bold || big ? 700 : 400 }}>{label}</span>
       <span style={{ fontWeight: bold || big ? 700 : 400 }}>₹ {Number(value).toFixed(2)}</span>
+    </div>
+  );
+}
+
+/* ---------------- Party Balances ---------------- */
+
+// A single at-a-glance view of every party's running balance, plus every
+// payment ever recorded — both totalled. Reuses partyLedgerTotals() so the
+// numbers here always match what each party's own Ledger tab shows.
+function PartyBalances({ data }) {
+  const [exportingKey, setExportingKey] = useState(null);
+
+  const triggerPrint = async (key, portalClass) => {
+    if (exportingKey) return;
+    setExportingKey(key);
+    try {
+      const today = fmtDateDisplay(new Date().toISOString().slice(0, 10));
+      const label = key === "balances" ? "Party Balances" : "Payments Received";
+      await exportPortalToPdf(portalClass, `${sanitizeForFilename(label)} - ${sanitizeForFilename(today)}`);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("Couldn't generate the PDF. Please try again.");
+    } finally {
+      setExportingKey(null);
+    }
+  };
+
+  const balances = useMemo(() => {
+    return data.parties
+      .map((p) => ({ party: p, ...partyLedgerTotals(data, p.id) }))
+      .sort((a, b) => b.balanceDue - a.balanceDue);
+  }, [data]);
+
+  const balanceTotals = useMemo(() => {
+    return balances.reduce(
+      (acc, r) => ({
+        openingBalance: round2(acc.openingBalance + r.openingBalance),
+        invoiced: round2(acc.invoiced + r.invoiced),
+        paid: round2(acc.paid + r.paid),
+        balanceDue: round2(acc.balanceDue + r.balanceDue),
+      }),
+      { openingBalance: 0, invoiced: 0, paid: 0, balanceDue: 0 }
+    );
+  }, [balances]);
+
+  const payments = useMemo(() => {
+    return [...(data.payments || [])].sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [data.payments]);
+
+  const paymentsTotal = round2(payments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+
+  return (
+    <div>
+      <PageHeader title="Party Balances" subtitle="Every party's running balance, and every payment received, in one place." />
+
+      <div style={styles.statRow}>
+        <StatCard label="Parties" value={data.parties.length} />
+        <StatCard label="Total invoiced (₹)" value={balanceTotals.invoiced.toFixed(2)} />
+        <StatCard label="Total received (₹)" value={balanceTotals.paid.toFixed(2)} />
+        <StatCard label="Total balance due (₹)" value={balanceTotals.balanceDue.toFixed(2)} />
+      </div>
+
+      {(() => {
+        const balancesContent = (
+          <>
+            <div style={styles.invoiceLetterhead}>
+              <div style={styles.invoiceCompany}>{(data.company || DEFAULT_COMPANY).name}</div>
+              <div style={styles.invoiceTagline}>{(data.company || DEFAULT_COMPANY).tagline}</div>
+              <div style={styles.invoiceAddress}>{(data.company || DEFAULT_COMPANY).address}</div>
+              <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>PARTY BALANCES</div>
+            </div>
+            <Panel title="Party Balances" hint="Opening Balance + Invoiced − Paid, per party">
+              {balances.length === 0 ? (
+                <Empty text="No parties yet — add one in Party Master." />
+              ) : (
+                <Table
+                  cols={["Party", "Opening Bal. (₹)", "Invoiced (₹)", "Paid (₹)", "Balance Due (₹)"]}
+                  rows={[
+                    ...balances.map((r) => [
+                      `${r.party.code} — ${r.party.name}`,
+                      r.openingBalance.toFixed(2),
+                      r.invoiced.toFixed(2),
+                      r.paid.toFixed(2),
+                      <strong style={{ color: r.balanceDue > 0 ? COLORS.danger : COLORS.muted }}>{r.balanceDue.toFixed(2)}</strong>,
+                    ]),
+                    [
+                      <strong>Total</strong>,
+                      <strong>{balanceTotals.openingBalance.toFixed(2)}</strong>,
+                      <strong>{balanceTotals.invoiced.toFixed(2)}</strong>,
+                      <strong>{balanceTotals.paid.toFixed(2)}</strong>,
+                      <strong>{balanceTotals.balanceDue.toFixed(2)}</strong>,
+                    ],
+                  ]}
+                />
+              )}
+            </Panel>
+          </>
+        );
+        return (
+          <div>
+            <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("balances", "print-portal--party-balances")}>
+                <Printer size={13} /> {exportingKey === "balances" ? "Generating…" : "Download PDF"}
+              </button>
+            </div>
+            {balancesContent}
+            <PrintPortal extraClass="print-portal--party-balances">{balancesContent}</PrintPortal>
+          </div>
+        );
+      })()}
+
+      {(() => {
+        const paymentsContent = (
+          <>
+            <div style={styles.invoiceLetterhead}>
+              <div style={styles.invoiceCompany}>{(data.company || DEFAULT_COMPANY).name}</div>
+              <div style={styles.invoiceTagline}>{(data.company || DEFAULT_COMPANY).tagline}</div>
+              <div style={styles.invoiceAddress}>{(data.company || DEFAULT_COMPANY).address}</div>
+              <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>PAYMENTS RECEIVED</div>
+            </div>
+            <Panel title={`Payments Received (${payments.length})`} hint="Every payment logged in Party Ledger, newest first">
+              {payments.length === 0 ? (
+                <Empty text="No payments recorded yet — log one from a party's Party Ledger tab." />
+              ) : (
+                <Table
+                  cols={["Date", "Party", "Mode", "Note", "Amount (₹)"]}
+                  rows={[
+                    ...payments.map((p) => [
+                      fmtDateDisplay(p.date),
+                      partyName(data, p.partyId),
+                      p.mode,
+                      p.note || "—",
+                      (Number(p.amount) || 0).toFixed(2),
+                    ]),
+                    [<strong>Total</strong>, "", "", "", <strong>{paymentsTotal.toFixed(2)}</strong>],
+                  ]}
+                />
+              )}
+            </Panel>
+          </>
+        );
+        return (
+          <div>
+            <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
+              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("payments", "print-portal--party-payments")}>
+                <Printer size={13} /> {exportingKey === "payments" ? "Generating…" : "Download PDF"}
+              </button>
+            </div>
+            {paymentsContent}
+            <PrintPortal extraClass="print-portal--party-payments">{paymentsContent}</PrintPortal>
+          </div>
+        );
+      })()}
     </div>
   );
 }
