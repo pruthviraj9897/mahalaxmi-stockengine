@@ -1544,6 +1544,11 @@ export default function StockEngine({ session, onLogout }) {
     attemptSave(next);
   }, [attemptSave, writeLocalBackup]);
 
+  // Flips the sidebar indicator to "Saving…" the instant you type, before
+  // the debounced draft write actually fires — so typing always shows
+  // immediate feedback rather than a delay while you're mid-word.
+  const markTyping = useCallback(() => setSaveState("saving"), []);
+
   const retrySave = useCallback(() => {
     if (!pendingSaveRef.current) return;
     setSaveState("saving");
@@ -1670,8 +1675,8 @@ export default function StockEngine({ session, onLogout }) {
 
       <main className="main-content" style={styles.main}>
         {tab === "dashboard" && <Dashboard data={data} />}
-        {tab === "parties" && <PartyMaster data={data} persist={persist} />}
-        {tab === "items" && <ItemMaster data={data} persist={persist} />}
+        {tab === "parties" && <PartyMaster data={data} persist={persist} markTyping={markTyping} />}
+        {tab === "items" && <ItemMaster data={data} persist={persist} markTyping={markTyping} />}
         {tab === "backup" && <BackupRestore data={data} persist={persist} />}
         {tab === "settings" && <CompanySettings data={data} persist={persist} />}
         {tab === "delivery" && <DeliveryEntry data={data} persist={persist} />}
@@ -2245,7 +2250,7 @@ function Dashboard({ data }) {
    "Saving…" / "Saved to cloud" indicator, but only becomes a real
    Party/Item/etc. record when you click Add/Save as before.
    ---------------------------------------------------------------- */
-function useDraftForm(key, blank, data, persist) {
+function useDraftForm(key, blank, data, persist, markTyping) {
   const initial = (data.drafts && data.drafts[key]) || blank;
   const [form, setFormRaw] = useState(initial);
   const debounceRef = useRef(null);
@@ -2253,12 +2258,13 @@ function useDraftForm(key, blank, data, persist) {
   const setForm = useCallback(
     (next) => {
       setFormRaw(next);
+      markTyping(); // "Saving…" the instant you type, not just once the debounce below fires
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         persist({ ...data, drafts: { ...(data.drafts || {}), [key]: next } });
       }, 700);
     },
-    [data, persist, key]
+    [data, persist, key, markTyping]
   );
 
   // Called after a successful Add/Save (or Cancel): clears both the
@@ -2277,9 +2283,9 @@ function useDraftForm(key, blank, data, persist) {
 
 /* ---------------- Party Master ---------------- */
 
-function PartyMaster({ data, persist }) {
+function PartyMaster({ data, persist, markTyping }) {
   const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST" };
-  const [form, setForm, resetForm] = useDraftForm("partyForm", blank, data, persist);
+  const [form, setForm, resetForm] = useDraftForm("partyForm", blank, data, persist, markTyping);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -2443,9 +2449,9 @@ function PartyMaster({ data, persist }) {
 
 /* ---------------- Item Master ---------------- */
 
-function ItemMaster({ data, persist }) {
+function ItemMaster({ data, persist, markTyping }) {
   const blank = { name: "", dailyRate: "", serviceCharge: "", totalDepotStock: "" };
-  const [form, setForm, resetForm] = useDraftForm("itemForm", blank, data, persist);
+  const [form, setForm, resetForm] = useDraftForm("itemForm", blank, data, persist, markTyping);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
