@@ -1468,6 +1468,7 @@ export default function StockEngine({ session, onLogout }) {
         if (!loaded.expenses) loaded.expenses = [];
         if (!loaded.expenseCategories || !loaded.expenseCategories.length) loaded.expenseCategories = [...DEFAULT_EXPENSE_CATEGORIES];
         if (!loaded.recycleBin) loaded.recycleBin = [];
+        if (!loaded.drafts) loaded.drafts = {};
         const prunedBin = purgeExpiredBinEntries(loaded.recycleBin);
         const binWasPruned = prunedBin.length !== loaded.recycleBin.length;
         loaded.recycleBin = prunedBin;
@@ -2233,11 +2234,52 @@ function Dashboard({ data }) {
   );
 }
 
+/* ----------------------------------------------------------------
+   DRAFT AUTOSAVE
+   A form that isn't submitted yet (you're still typing) is NOT a
+   real record — saving it straight into data.parties/items/etc. on
+   every keystroke would risk writing half-finished entries into
+   your real business data. Instead, in-progress typing is saved
+   into a separate `data.drafts[key]` bucket in the same cloud
+   record, debounced ~700ms after you stop typing. It shows the same
+   "Saving…" / "Saved to cloud" indicator, but only becomes a real
+   Party/Item/etc. record when you click Add/Save as before.
+   ---------------------------------------------------------------- */
+function useDraftForm(key, blank, data, persist) {
+  const initial = (data.drafts && data.drafts[key]) || blank;
+  const [form, setFormRaw] = useState(initial);
+  const debounceRef = useRef(null);
+
+  const setForm = useCallback(
+    (next) => {
+      setFormRaw(next);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        persist({ ...data, drafts: { ...(data.drafts || {}), [key]: next } });
+      }, 700);
+    },
+    [data, persist, key]
+  );
+
+  // Called after a successful Add/Save (or Cancel): clears both the
+  // on-screen form and the saved draft, since it's either now a real
+  // record or the user backed out.
+  const resetForm = useCallback(() => {
+    setFormRaw(blank);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const nextDrafts = { ...(data.drafts || {}) };
+    delete nextDrafts[key];
+    persist({ ...data, drafts: nextDrafts });
+  }, [data, persist, key, blank]);
+
+  return [form, setForm, resetForm];
+}
+
 /* ---------------- Party Master ---------------- */
 
 function PartyMaster({ data, persist }) {
   const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST" };
-  const [form, setForm] = useState(blank);
+  const [form, setForm, resetForm] = useDraftForm("partyForm", blank, data, persist);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -2257,7 +2299,7 @@ function PartyMaster({ data, persist }) {
         seq: { ...data.seq, party: data.seq.party + 1 },
       });
     }
-    setForm(blank);
+    resetForm();
   };
 
   const startEdit = (p) => {
@@ -2273,7 +2315,7 @@ function PartyMaster({ data, persist }) {
       gstType: p.gstType || "CGST_SGST",
     });
   };
-  const cancelEdit = () => { setEditingId(null); setForm(blank); };
+  const cancelEdit = () => { setEditingId(null); resetForm(); };
 
   const remove = (id) => {
     const party = data.parties.find((p) => p.id === id);
@@ -2403,7 +2445,7 @@ function PartyMaster({ data, persist }) {
 
 function ItemMaster({ data, persist }) {
   const blank = { name: "", dailyRate: "", serviceCharge: "", totalDepotStock: "" };
-  const [form, setForm] = useState(blank);
+  const [form, setForm, resetForm] = useDraftForm("itemForm", blank, data, persist);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -2426,14 +2468,14 @@ function ItemMaster({ data, persist }) {
         seq: { ...data.seq, item: data.seq.item + 1 },
       });
     }
-    setForm(blank);
+    resetForm();
   };
 
   const startEdit = (it) => {
     setEditingId(it.id);
     setForm({ name: it.name, dailyRate: it.dailyRate, serviceCharge: it.serviceCharge, totalDepotStock: it.totalDepotStock });
   };
-  const cancelEdit = () => { setEditingId(null); setForm(blank); };
+  const cancelEdit = () => { setEditingId(null); resetForm(); };
 
   const remove = (id) => {
     const item = data.items.find((i) => i.id === id);
