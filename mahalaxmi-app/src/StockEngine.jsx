@@ -5538,6 +5538,7 @@ const globalCss = `
 const styles = {
   app: {
     display: "flex",
+    height: "100vh",
     fontFamily: "'Georgia', 'Iowan Old Style', serif",
     background: COLORS.bg,
     color: COLORS.ink,
@@ -5552,6 +5553,7 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
+    overflowY: "auto",
   },
   brand: { display: "flex", alignItems: "center", gap: 10, padding: "4px 6px 22px" },
   brandMark: {
