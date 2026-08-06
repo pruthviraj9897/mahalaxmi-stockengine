@@ -1636,27 +1636,6 @@ export default function StockEngine({ session, onLogout }) {
             );
           })}
         </nav>
-        <div style={styles.saveIndicator}>
-          {saveState === "saving" && <span style={styles.saveDim}>Saving…</span>}
-          {saveState === "saved" && (
-            <span style={styles.saveOk}><CheckCircle2 size={13} /> Saved to cloud</span>
-          )}
-          {saveState === "error" && (
-            <span style={{ color: "#e0745a", display: "flex", alignItems: "center", gap: 6 }}>
-              <AlertCircle size={13} /> Not saved
-              <button
-                onClick={retrySave}
-                style={{
-                  background: "transparent", border: "1px solid #e0745a", borderRadius: 4,
-                  color: "#e0745a", fontSize: 10.5, padding: "1px 6px", cursor: "pointer",
-                  fontFamily: "system-ui, sans-serif",
-                }}
-              >
-                Retry
-              </button>
-            </span>
-          )}
-        </div>
         <div style={{ padding: "10px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           {session?.user?.email && (
             <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 8, wordBreak: "break-all" }}>
@@ -1674,21 +1653,60 @@ export default function StockEngine({ session, onLogout }) {
       </aside>
 
       <main className="main-content" style={styles.main}>
-        {tab === "dashboard" && <Dashboard data={data} />}
-        {tab === "parties" && <PartyMaster data={data} persist={persist} markTyping={markTyping} />}
-        {tab === "items" && <ItemMaster data={data} persist={persist} markTyping={markTyping} />}
-        {tab === "backup" && <BackupRestore data={data} persist={persist} />}
-        {tab === "settings" && <CompanySettings data={data} persist={persist} />}
-        {tab === "delivery" && <DeliveryEntry data={data} persist={persist} />}
-        {tab === "return" && <ReturnEntry data={data} persist={persist} />}
-        {tab === "invoice" && <InvoiceBuilder data={data} persist={persist} />}
-        {tab === "bulkInvoice" && <BulkInvoiceBuilder data={data} persist={persist} />}
-        {tab === "archive" && <InvoiceArchive data={data} persist={persist} />}
-        {tab === "ledger" && <PartyLedger data={data} persist={persist} />}
-        {tab === "balances" && <PartyBalances data={data} />}
-        {tab === "expenses" && <Expenses data={data} persist={persist} />}
-        {tab === "recyclebin" && <RecycleBin data={data} persist={persist} />}
+        {/* Frozen header — stays pinned to the top of the scroll area on every
+            tab, so the Saving…/Saved indicator is always visible right where
+            you're typing instead of scrolling out of view at the bottom of
+            the sidebar. */}
+        <div style={styles.mainTopBar}>
+          <SaveStatus saveState={saveState} retrySave={retrySave} />
+        </div>
+        <div className="main-content-inner" style={styles.mainInner}>
+          {tab === "dashboard" && <Dashboard data={data} />}
+          {tab === "parties" && <PartyMaster data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "items" && <ItemMaster data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "backup" && <BackupRestore data={data} persist={persist} />}
+          {tab === "settings" && <CompanySettings data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "delivery" && <DeliveryEntry data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "return" && <ReturnEntry data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "invoice" && <InvoiceBuilder data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "bulkInvoice" && <BulkInvoiceBuilder data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "archive" && <InvoiceArchive data={data} persist={persist} />}
+          {tab === "ledger" && <PartyLedger data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "balances" && <PartyBalances data={data} />}
+          {tab === "expenses" && <Expenses data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "recyclebin" && <RecycleBin data={data} persist={persist} />}
+        </div>
       </main>
+    </div>
+  );
+}
+
+// Save status pill — shared by the frozen top bar (every tab). Pulled out
+// so the "Saving… / Saved to cloud / Not saved" look is identical wherever
+// it's shown.
+function SaveStatus({ saveState, retrySave }) {
+  return (
+    <div style={styles.saveIndicator}>
+      {saveState === "saving" && <span style={styles.saveDim}>Saving…</span>}
+      {saveState === "saved" && (
+        <span style={styles.saveOk}><CheckCircle2 size={13} /> Saved to cloud</span>
+      )}
+      {saveState === "error" && (
+        <span style={{ color: "#e0745a", display: "flex", alignItems: "center", gap: 6 }}>
+          <AlertCircle size={13} /> Not saved
+          <button
+            onClick={retrySave}
+            style={{
+              background: "transparent", border: "1px solid #e0745a", borderRadius: 4,
+              color: "#e0745a", fontSize: 10.5, padding: "1px 6px", cursor: "pointer",
+              fontFamily: "system-ui, sans-serif",
+            }}
+          >
+            Retry
+          </button>
+        </span>
+      )}
+      {saveState === "idle" && <span style={{ ...styles.saveDim, opacity: 0.5 }}>All changes saved</span>}
     </div>
   );
 }
@@ -2267,25 +2285,48 @@ function useDraftForm(key, blank, data, persist, markTyping) {
     [data, persist, key, markTyping]
   );
 
-  // Called after a successful Add/Save (or Cancel): clears both the
-  // on-screen form and the saved draft, since it's either now a real
-  // record or the user backed out.
-  const resetForm = useCallback(() => {
-    setFormRaw(blank);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    const nextDrafts = { ...(data.drafts || {}) };
-    delete nextDrafts[key];
-    persist({ ...data, drafts: nextDrafts });
-  }, [data, persist, key, blank]);
+  // `data.drafts` with this form's entry removed — merge this into any
+  // payload you're about to persist() so the draft is cleared in the SAME
+  // write as the real save, instead of a second write racing right after
+  // it (which could clobber the record you just added, since that second
+  // write's own `data` closure predates the save).
+  const clearedDrafts = useCallback(() => {
+    const next = { ...(data.drafts || {}) };
+    delete next[key];
+    return next;
+  }, [data.drafts, key]);
 
-  return [form, setForm, resetForm];
+  // Resets the on-screen form only — no persist call of its own. Use this
+  // right after you've already persist()ed a real save (with clearedDrafts()
+  // merged into that same payload), so the visible form goes blank without
+  // firing a second, stale write.
+  const resetFormLocal = useCallback(
+    (overrideBlank) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      setFormRaw(overrideBlank !== undefined ? overrideBlank : blank);
+    },
+    [blank]
+  );
+
+  // Standalone reset for when nothing else is being saved in the same
+  // action (e.g. a Cancel button): resets the form AND immediately
+  // persists the drafts-cleared state.
+  const resetForm = useCallback(
+    (overrideBlank) => {
+      resetFormLocal(overrideBlank);
+      persist({ ...data, drafts: clearedDrafts() });
+    },
+    [data, persist, clearedDrafts, resetFormLocal]
+  );
+
+  return [form, setForm, resetForm, resetFormLocal, clearedDrafts];
 }
 
 /* ---------------- Party Master ---------------- */
 
 function PartyMaster({ data, persist, markTyping }) {
   const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST" };
-  const [form, setForm, resetForm] = useDraftForm("partyForm", blank, data, persist, markTyping);
+  const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("partyForm", blank, data, persist, markTyping);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -2294,18 +2335,21 @@ function PartyMaster({ data, persist, markTyping }) {
     // Opening Balance is edited from the Party Ledger tab, not here — so it's
     // deliberately left out of this payload to avoid overwriting it on every save.
     const payload = { ...form };
+    let next;
     if (editingId) {
-      persist({ ...data, parties: data.parties.map((p) => (p.id === editingId ? { ...p, ...payload } : p)) });
+      next = { ...data, parties: data.parties.map((p) => (p.id === editingId ? { ...p, ...payload } : p)) };
       setEditingId(null);
     } else {
       const code = uid("P", data.seq.party);
-      persist({
+      next = {
         ...data,
         parties: [...data.parties, { id: crypto.randomUUID(), code, ...payload }],
         seq: { ...data.seq, party: data.seq.party + 1 },
-      });
+      };
     }
-    resetForm();
+    // Draft-clear rides along in this same write, not a separate one.
+    persist({ ...next, drafts: clearedDrafts() });
+    resetFormLocal();
   };
 
   const startEdit = (p) => {
@@ -2451,7 +2495,7 @@ function PartyMaster({ data, persist, markTyping }) {
 
 function ItemMaster({ data, persist, markTyping }) {
   const blank = { name: "", dailyRate: "", serviceCharge: "", totalDepotStock: "" };
-  const [form, setForm, resetForm] = useDraftForm("itemForm", blank, data, persist, markTyping);
+  const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("itemForm", blank, data, persist, markTyping);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
@@ -2463,18 +2507,20 @@ function ItemMaster({ data, persist, markTyping }) {
       serviceCharge: Number(form.serviceCharge) || 0,
       totalDepotStock: Number(form.totalDepotStock) || 0,
     };
+    let next;
     if (editingId) {
-      persist({ ...data, items: data.items.map((i) => (i.id === editingId ? { ...i, ...payload } : i)) });
+      next = { ...data, items: data.items.map((i) => (i.id === editingId ? { ...i, ...payload } : i)) };
       setEditingId(null);
     } else {
       const code = uid("I", data.seq.item);
-      persist({
+      next = {
         ...data,
         items: [...data.items, { id: crypto.randomUUID(), code, ...payload }],
         seq: { ...data.seq, item: data.seq.item + 1 },
-      });
+      };
     }
-    resetForm();
+    persist({ ...next, drafts: clearedDrafts() });
+    resetFormLocal();
   };
 
   const startEdit = (it) => {
@@ -2546,7 +2592,7 @@ function ItemMaster({ data, persist, markTyping }) {
 
 /* ---------------- Delivery Entry ---------------- */
 
-function DeliveryEntry({ data, persist }) {
+function DeliveryEntry({ data, persist, markTyping }) {
   const emptyHeader = {
     date: new Date().toISOString().slice(0, 10),
     partyId: "",
@@ -2556,13 +2602,18 @@ function DeliveryEntry({ data, persist }) {
     transportCharge: "",
     deposit: "",
   };
-  const [header, setHeader] = useState(emptyHeader);
-  const [lines, setLines] = useState([{ itemId: "", qty: "", rate: "" }]);
+  const emptyLines = [{ itemId: "", qty: "", rate: "" }];
+  const blankForm = { header: emptyHeader, lines: emptyLines, challanNoInput: String(data.seq.delivery) };
+  const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("deliveryForm", blankForm, data, persist, markTyping);
+  const { header, lines, challanNoInput } = form;
+  const setHeader = (h) => setForm({ ...form, header: h });
+  const setLines = (l) => setForm({ ...form, lines: l });
+  const setChallanNoInput = (v) => setForm({ ...form, challanNoInput: v });
+
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [sortBy, setSortBy] = useState("date"); // "date" | "updated"
   const [filterPartyId, setFilterPartyId] = useState("");
-  const [challanNoInput, setChallanNoInput] = useState(String(data.seq.delivery));
 
   const setLine = (idx, patch) => {
     const next = [...lines];
@@ -2580,24 +2631,25 @@ function DeliveryEntry({ data, persist }) {
 
   const startEdit = (c) => {
     setEditingId(c.id);
-    setChallanNoInput(String(c.challanNo));
-    setHeader({
-      date: c.date,
-      partyId: c.partyId,
-      siteAddress: c.siteAddress || "",
-      driverName: c.driverName || "",
-      vehicleNumber: c.vehicleNumber || "",
-      transportCharge: c.transportCharge || "",
-      deposit: c.deposit || "",
+    setForm({
+      ...form,
+      challanNoInput: String(c.challanNo),
+      header: {
+        date: c.date,
+        partyId: c.partyId,
+        siteAddress: c.siteAddress || "",
+        driverName: c.driverName || "",
+        vehicleNumber: c.vehicleNumber || "",
+        transportCharge: c.transportCharge || "",
+        deposit: c.deposit || "",
+      },
+      lines: c.lines.map((l) => ({ itemId: l.itemId, qty: l.qty, rate: l.rate })),
     });
-    setLines(c.lines.map((l) => ({ itemId: l.itemId, qty: l.qty, rate: l.rate })));
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setChallanNoInput(String(data.seq.delivery));
-    setHeader(emptyHeader);
-    setLines([{ itemId: "", qty: "", rate: "" }]);
+    resetForm({ header: emptyHeader, lines: emptyLines, challanNoInput: String(data.seq.delivery) });
   };
 
   const removeChallan = (id) => {
@@ -2658,11 +2710,9 @@ function DeliveryEntry({ data, persist }) {
         seq: { ...data.seq, delivery: Math.max(data.seq.delivery, challanNo) + 1 },
       };
     }
-    persist(next);
+    persist({ ...next, drafts: clearedDrafts() });
     setEditingId(null);
-    setChallanNoInput(String(next.seq.delivery));
-    setHeader(emptyHeader);
-    setLines([{ itemId: "", qty: "", rate: "" }]);
+    resetFormLocal({ header: emptyHeader, lines: emptyLines, challanNoInput: String(next.seq.delivery) });
   };
 
   const duplicateChallanNo = data.deliveryChallans.some(
@@ -2776,15 +2826,20 @@ function DeliveryEntry({ data, persist }) {
 
 /* ---------------- Return Entry ---------------- */
 
-function ReturnEntry({ data, persist }) {
+function ReturnEntry({ data, persist, markTyping }) {
   const emptyHeader = { date: new Date().toISOString().slice(0, 10), partyId: "" };
-  const [header, setHeader] = useState(emptyHeader);
-  const [lines, setLines] = useState([{ itemId: "", againstChallanId: "", qty: "", brokenQty: "", brokenRate: "" }]);
+  const emptyLines = [{ itemId: "", againstChallanId: "", qty: "", brokenQty: "", brokenRate: "" }];
+  const blankForm = { header: emptyHeader, lines: emptyLines, returnNoInput: String(data.seq.return) };
+  const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("returnForm", blankForm, data, persist, markTyping);
+  const { header, lines, returnNoInput } = form;
+  const setHeader = (h) => setForm({ ...form, header: h });
+  const setLines = (l) => setForm({ ...form, lines: l });
+  const setReturnNoInput = (v) => setForm({ ...form, returnNoInput: v });
+
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [sortBy, setSortBy] = useState("date"); // "date" | "updated"
   const [filterPartyId, setFilterPartyId] = useState("");
-  const [returnNoInput, setReturnNoInput] = useState(String(data.seq.return));
 
   const setLine = (idx, patch) => {
     const next = [...lines];
@@ -2799,16 +2854,17 @@ function ReturnEntry({ data, persist }) {
 
   const startEdit = (c) => {
     setEditingId(c.id);
-    setReturnNoInput(String(c.returnChallanNo));
-    setHeader({ date: c.date, partyId: c.partyId });
-    setLines(c.lines.map((l) => ({ itemId: l.itemId, againstChallanId: l.againstChallanId, qty: l.qty, brokenQty: l.brokenQty, brokenRate: l.brokenRate })));
+    setForm({
+      ...form,
+      returnNoInput: String(c.returnChallanNo),
+      header: { date: c.date, partyId: c.partyId },
+      lines: c.lines.map((l) => ({ itemId: l.itemId, againstChallanId: l.againstChallanId, qty: l.qty, brokenQty: l.brokenQty, brokenRate: l.brokenRate })),
+    });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setReturnNoInput(String(data.seq.return));
-    setHeader(emptyHeader);
-    setLines([{ itemId: "", againstChallanId: "", qty: "", brokenQty: "", brokenRate: "" }]);
+    resetForm({ header: emptyHeader, lines: emptyLines, returnNoInput: String(data.seq.return) });
   };
 
   const removeChallan = (id) => {
@@ -2860,11 +2916,9 @@ function ReturnEntry({ data, persist }) {
         seq: { ...data.seq, return: Math.max(data.seq.return, returnChallanNo) + 1 },
       };
     }
-    persist(next);
+    persist({ ...next, drafts: clearedDrafts() });
     setEditingId(null);
-    setReturnNoInput(String(next.seq.return));
-    setHeader(emptyHeader);
-    setLines([{ itemId: "", againstChallanId: "", qty: "", brokenQty: "", brokenRate: "" }]);
+    resetFormLocal({ header: emptyHeader, lines: emptyLines, returnNoInput: String(next.seq.return) });
   };
 
   const sortedChallans = useMemo(() => {
@@ -3030,12 +3084,21 @@ const emptyInvoiceLine = () => ({
   _manual: true,
 });
 
-function InvoiceBuilder({ data, persist }) {
-  const [partyId, setPartyId] = useState("");
-  const [billStart, setBillStart] = useState("");
-  const [billEnd, setBillEnd] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
-  const [invoiceNoInput, setInvoiceNoInput] = useState(String(data.seq.invoice));
+function InvoiceBuilder({ data, persist, markTyping }) {
+  const blankHeader = {
+    partyId: "",
+    billStart: "",
+    billEnd: "",
+    invoiceDate: new Date().toISOString().slice(0, 10),
+    invoiceNoInput: String(data.seq.invoice),
+  };
+  const [invHeader, setInvHeader, resetInvHeader, resetInvHeaderLocal, clearedInvDrafts] = useDraftForm("invoiceHeader", blankHeader, data, persist, markTyping);
+  const { partyId, billStart, billEnd, invoiceDate, invoiceNoInput } = invHeader;
+  const setPartyId = (v) => setInvHeader({ ...invHeader, partyId: v });
+  const setBillStart = (v) => setInvHeader({ ...invHeader, billStart: v });
+  const setBillEnd = (v) => setInvHeader({ ...invHeader, billEnd: v });
+  const setInvoiceDate = (v) => setInvHeader({ ...invHeader, invoiceDate: v });
+  const setInvoiceNoInput = (v) => setInvHeader({ ...invHeader, invoiceNoInput: v });
 
   // Editable lines state — seeded from computed result, then user can tweak
   const [editableLines, setEditableLines] = useState(null); // null = use computed
@@ -3132,15 +3195,12 @@ function InvoiceBuilder({ data, persist }) {
       ],
       seq: { ...data.seq, invoice: Math.max(data.seq.invoice, invoiceNo) + 1 },
     };
-    persist(next);
-    setPartyId("");
-    setBillStart("");
-    setBillEnd("");
+    persist({ ...next, drafts: clearedInvDrafts() });
+    resetInvHeaderLocal({ ...blankHeader, invoiceNoInput: String(next.seq.invoice) });
     setEditMode(false);
     setEditableLines(null);
     setTransportOverride("");
     setDepositOverride("");
-    setInvoiceNoInput(String(next.seq.invoice));
   };
 
   const enterEditMode = () => {
@@ -3382,10 +3442,13 @@ function InvoiceBuilder({ data, persist }) {
 // in a single persist(), then renders + captures each as a PDF off-screen
 // and bundles the set into one .zip download.
 
-function BulkInvoiceBuilder({ data, persist }) {
-  const [billStart, setBillStart] = useState("");
-  const [billEnd, setBillEnd] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+function BulkInvoiceBuilder({ data, persist, markTyping }) {
+  const blankWindow = { billStart: "", billEnd: "", invoiceDate: new Date().toISOString().slice(0, 10) };
+  const [bulkWindow, setBulkWindow] = useDraftForm("bulkInvoiceWindow", blankWindow, data, persist, markTyping);
+  const { billStart, billEnd, invoiceDate } = bulkWindow;
+  const setBillStart = (v) => setBulkWindow({ ...bulkWindow, billStart: v });
+  const setBillEnd = (v) => setBulkWindow({ ...bulkWindow, billEnd: v });
+  const setInvoiceDate = (v) => setBulkWindow({ ...bulkWindow, invoiceDate: v });
   const [excludedIds, setExcludedIds] = useState(() => new Set());
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -4244,15 +4307,16 @@ const emptyPaymentForm = () => ({
   note: "",
 });
 
-function PartyLedger({ data, persist }) {
+function PartyLedger({ data, persist, markTyping }) {
   const [partyId, setPartyId] = useState("");
-  const [paymentForm, setPaymentForm] = useState(emptyPaymentForm());
+  const [paymentForm, setPaymentForm, resetPaymentForm, resetPaymentFormLocal, clearedPaymentDrafts] = useDraftForm("paymentForm", emptyPaymentForm(), data, persist, markTyping);
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
   const party = data.parties.find((p) => p.id === partyId);
 
   // reset the payment form whenever the selected party changes
   useEffect(() => {
-    setPaymentForm(emptyPaymentForm());
+    resetPaymentFormLocal(emptyPaymentForm());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partyId]);
 
   // Opening Balance is edited right here, not in Party Master — kept in its
@@ -4314,8 +4378,8 @@ function PartyLedger({ data, persist }) {
         },
       ],
     };
-    persist(next);
-    setPaymentForm(emptyPaymentForm());
+    persist({ ...next, drafts: clearedPaymentDrafts() });
+    resetPaymentFormLocal(emptyPaymentForm());
   };
 
   const deletePayment = (id) => {
@@ -4774,8 +4838,8 @@ function defaultPeriod() {
   };
 }
 
-function Expenses({ data, persist }) {
-  const [form, setForm] = useState(emptyExpenseForm());
+function Expenses({ data, persist, markTyping }) {
+  const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("expenseForm", emptyExpenseForm(), data, persist, markTyping);
   const [customCategory, setCustomCategory] = useState("");
   const [addingCustom, setAddingCustom] = useState(false);
   const initialPeriod = defaultPeriod();
@@ -4802,8 +4866,8 @@ function Expenses({ data, persist }) {
         },
       ],
     };
-    persist(next);
-    setForm(emptyExpenseForm());
+    persist({ ...next, drafts: clearedDrafts() });
+    resetFormLocal(emptyExpenseForm());
   };
 
   const deleteExpense = (id) => {
@@ -4824,8 +4888,12 @@ function Expenses({ data, persist }) {
       return;
     }
     const nextCategories = [...existing, name];
-    persist({ ...data, expenseCategories: nextCategories });
-    setForm({ ...form, category: name });
+    const updatedForm = { ...form, category: name };
+    // Single write: category list change + draft update together, so the
+    // draft's own (stale-by-then) debounced save can't race and undo the
+    // new category a moment later.
+    persist({ ...data, expenseCategories: nextCategories, drafts: { ...(data.drafts || {}), expenseForm: updatedForm } });
+    resetFormLocal(updatedForm);
     setCustomCategory("");
     setAddingCustom(false);
   };
@@ -5139,15 +5207,18 @@ function BackupRestore({ data, persist }) {
 
 /* ---------------- Company Settings ---------------- */
 
-function CompanySettings({ data, persist }) {
+function CompanySettings({ data, persist, markTyping }) {
   const current = { ...DEFAULT_COMPANY, ...(data.company || {}) };
-  const [form, setForm] = useState(current);
+  const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("companySettingsForm", current, data, persist, markTyping);
   const [saved, setSaved] = useState(false);
 
   const dirty = JSON.stringify(form) !== JSON.stringify(current);
 
   const save = () => {
-    persist({ ...data, company: { ...form } });
+    // Single write: the letterhead change + the draft-clear together, so
+    // the debounced draft save can't fire afterward and undo it.
+    persist({ ...data, company: { ...form }, drafts: clearedDrafts() });
+    resetFormLocal(form);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
   };
@@ -5428,6 +5499,8 @@ const globalCss = `
 
     .main-content {
       width: 100% !important;
+    }
+    .main-content-inner {
       padding: 14px !important;
     }
 
@@ -5496,10 +5569,16 @@ const styles = {
     transition: "background 0.15s",
   },
   navBtnActive: { background: "rgba(181,101,29,0.25)", color: "#fff" },
-  saveIndicator: { height: 20, paddingLeft: 10, fontSize: 11.5, fontFamily: "system-ui, sans-serif" },
-  saveDim: { color: "#8a7d6b" },
-  saveOk: { color: "#c9e4a8", display: "flex", alignItems: "center", gap: 4 },
-  main: { flex: 1, padding: "28px 34px 60px", overflowY: "auto" },
+  saveIndicator: { height: 20, fontSize: 11.5, fontFamily: "system-ui, sans-serif" },
+  saveDim: { color: COLORS.muted },
+  saveOk: { color: "#3a7d3a", display: "flex", alignItems: "center", gap: 4 },
+  main: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", minHeight: 0 },
+  mainTopBar: {
+    position: "sticky", top: 0, zIndex: 20, flexShrink: 0,
+    display: "flex", alignItems: "center", justifyContent: "flex-end",
+    padding: "10px 34px", background: COLORS.panel, borderBottom: `1px solid ${COLORS.border}`,
+  },
+  mainInner: { padding: "28px 34px 60px" },
   pageHeader: { marginBottom: 22, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 14 },
   h1: { fontSize: 22, margin: 0, fontWeight: 700 },
   subtitle: { fontSize: 13, color: COLORS.muted, margin: "6px 0 0", fontFamily: "system-ui, sans-serif" },
