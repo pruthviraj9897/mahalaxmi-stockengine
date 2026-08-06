@@ -1633,7 +1633,7 @@ export default function StockEngine({ session, onLogout }) {
         <div style={styles.saveIndicator}>
           {saveState === "saving" && <span style={styles.saveDim}>Saving…</span>}
           {saveState === "saved" && (
-            <span style={styles.saveOk}><CheckCircle2 size={13} /> Saved</span>
+            <span style={styles.saveOk}><CheckCircle2 size={13} /> Saved to cloud</span>
           )}
           {saveState === "error" && (
             <span style={{ color: "#e0745a", display: "flex", alignItems: "center", gap: 6 }}>
