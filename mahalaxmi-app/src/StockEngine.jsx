@@ -5265,7 +5265,7 @@ function CompanySettings({ data, persist, markTyping }) {
 
 function PageHeader({ title, subtitle }) {
   return (
-    <div style={styles.pageHeader}>
+    <div className="ui-pagehead" style={styles.pageHeader}>
       <h1 style={styles.h1}>{title}</h1>
       {subtitle && <p style={styles.subtitle}>{subtitle}</p>}
     </div>
@@ -5273,7 +5273,7 @@ function PageHeader({ title, subtitle }) {
 }
 function Panel({ title, hint, children }) {
   return (
-    <div style={styles.panel}>
+    <div className="ui-panel" style={styles.panel}>
       <div style={styles.panelHeader}>
         <h2 style={styles.h2}>{title}</h2>
         {hint && <span style={styles.hint}>{hint}</span>}
@@ -5299,10 +5299,36 @@ function ConfirmDelete({ id, confirmId, setConfirmId, onConfirm, label = "Delete
     <button style={styles.iconBtn} onClick={() => setConfirmId(id)} title={title}><Icon size={14} /></button>
   );
 }
+function useCountUp(value) {
+  // Animates numeric stat values from 0 -> value on mount/change.
+  // Non-numeric values (pre-formatted strings) pass straight through.
+  const raw = typeof value === "number" && isFinite(value) ? value : null;
+  const [shown, setShown] = useState(raw ?? 0);
+  useEffect(() => {
+    if (raw === null) return;
+    if (typeof window !== "undefined" && window.matchMedia
+        && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setShown(raw);
+      return;
+    }
+    let frame;
+    const start = performance.now();
+    const step = (t) => {
+      const p = Math.min(1, (t - start) / 550);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setShown(Math.round(raw * eased * 100) / 100);
+      if (p < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [raw]);
+  return raw === null ? value : shown;
+}
 function StatCard({ label, value }) {
+  const shown = useCountUp(value);
   return (
-    <div style={styles.statCard}>
-      <div style={styles.statValue}>{value}</div>
+    <div className="ui-stat" style={styles.statCard}>
+      <div style={styles.statValue}>{shown}</div>
       <div style={styles.statLabel}>{label}</div>
     </div>
   );
@@ -5312,13 +5338,13 @@ function Table({ cols, rows, serial = true }) {
   const allRows = serial ? rows.map((r, i) => [i + 1, ...r]) : rows;
   return (
     <div className="table-wrap" style={styles.tableWrap}>
-      <table style={styles.table}>
+      <table className="ui-table" style={styles.table}>
         <thead>
           <tr>{allCols.map((c, i) => <th key={i} style={styles.th}>{c}</th>)}</tr>
         </thead>
         <tbody>
           {allRows.map((r, i) => (
-            <tr key={i} style={styles.tr}>
+            <tr key={i} className="ui-row" style={{ ...styles.tr, animationDelay: `${Math.min(i, 12) * 22}ms` }}>
               {r.map((cell, j) => <td key={j} style={styles.td}>{cell}</td>)}
             </tr>
           ))}
@@ -5434,6 +5460,61 @@ const globalCss = `
   }
 
   /* ---- Two-column grid (desktop default) ---- */
+  /* ---------- Motion features (presentation only) ----------
+     Everything here is additive CSS + class hooks: no data, totals or
+     print output changes. All motion is disabled under
+     prefers-reduced-motion and inside @media print. */
+  @keyframes ui-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes ui-row-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes ui-sheen { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+  @keyframes ui-fade { from { opacity: 0; } to { opacity: 1; } }
+
+  .ui-panel, .ui-stat, .ui-pagehead { animation: ui-rise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .ui-panel { transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease; }
+  .ui-panel:hover { border-color: var(--amber); box-shadow: 0 10px 28px rgba(36,28,20,0.10); }
+
+  .ui-stat { position: relative; overflow: hidden; transition: transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s ease; }
+  .ui-stat:hover { transform: translateY(-3px); box-shadow: 0 14px 30px rgba(36,28,20,0.14); }
+  .ui-stat::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
+    background: linear-gradient(110deg, transparent 30%, rgba(181,101,29,0.14) 50%, transparent 70%);
+    background-size: 200% 100%; transition: opacity 0.2s ease;
+  }
+  .ui-stat:hover::after { opacity: 1; animation: ui-sheen 1.1s linear infinite; }
+
+  .ui-row { animation: ui-row-in 0.3s ease both; }
+  .ui-table tbody tr td { transition: background 0.15s ease; }
+  .ui-table tbody tr:hover td { background: rgba(181,101,29,0.08); }
+  .ui-table tbody tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--amber); }
+
+  .main-content button, .sidebar button {
+    transition: transform 0.15s ease, filter 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  }
+  .main-content button:hover { transform: translateY(-1px); filter: brightness(1.05); }
+  .main-content button:active { transform: translateY(0) scale(0.98); }
+  .sidebar button:hover { background: rgba(255,255,255,0.06); transform: translateX(2px); }
+
+  .main-content input, .main-content select, .main-content textarea {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+  .main-content input:focus, .main-content select:focus, .main-content textarea:focus {
+    border-color: var(--amber) !important;
+    box-shadow: 0 0 0 3px rgba(181,101,29,0.15);
+  }
+
+  /* Drawer springs open instead of sliding linearly */
+  .sidebar { transition: left 0.32s cubic-bezier(0.22, 1, 0.36, 1) !important; }
+  .mobile-backdrop { animation: ui-fade 0.2s ease both; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  @media print {
+    .ui-panel, .ui-stat, .ui-row, .ui-pagehead { animation: none !important; opacity: 1 !important; transform: none !important; }
+    .ui-stat::after { display: none !important; }
+  }
+
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 
   /* ---- Mobile layout (phones/small tablets) ---- */
