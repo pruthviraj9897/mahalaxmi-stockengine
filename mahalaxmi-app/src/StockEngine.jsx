@@ -2438,12 +2438,12 @@ function PartyMaster({ data, persist, markTyping }) {
     <div>
       <PageHeader title="Party Master" subtitle="Codes are permanent. Rename freely — every past entry follows the new name automatically." />
       <Panel title={editingId ? "Edit Party (code stays fixed)" : "Add Party"}>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Party Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
           <Field label="Site Name" value={form.siteName} onChange={(v) => setForm({ ...form, siteName: v })} />
           <Field label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
         </div>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} wide />
           <div style={{ ...styles.field, minWidth: 220 }}>
             <span style={styles.fieldLabel}>References</span>
@@ -2480,7 +2480,7 @@ function PartyMaster({ data, persist, markTyping }) {
             </button>
           </div>
         </div>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <label style={{ ...styles.field, flexDirection: "row", alignItems: "center", gap: 8, minWidth: 160 }}>
             <input
               type="checkbox"
@@ -2600,7 +2600,7 @@ function ItemMaster({ data, persist, markTyping }) {
     <div>
       <PageHeader title="Item Master" subtitle={'Add "ft" to the item name (e.g. "chavi 8ft") to mark it as a running-feet item.'} />
       <Panel title={editingId ? "Edit Item (code stays fixed)" : "Add Item"}>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Item Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} placeholder="e.g. chavi 8ft" />
           <Field label="Daily Rate" value={form.dailyRate} onChange={(v) => setForm({ ...form, dailyRate: v })} type="number" />
           <Field label="Service Charge / unit" value={form.serviceCharge} onChange={(v) => setForm({ ...form, serviceCharge: v })} type="number" />
@@ -2785,7 +2785,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
       <Panel title={editingId ? `Editing Delivery Challan No. ${data.deliveryChallans.find((c) => c.id === editingId)?.challanNo ?? ""}` : "New Delivery Challan"}>
         {data.parties.length === 0 && <Notice text="Add at least one party in Party Master first." />}
         {duplicateChallanNo && <Notice text={`Challan No. ${challanNoInput} is already used by another delivery challan.`} />}
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Challan No." type="number" value={challanNoInput} onChange={setChallanNoInput} />
           <Field label="Date" type="date" value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
           <SelectField
@@ -2796,7 +2796,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
           />
           <Field label="Site Address" value={header.siteAddress} onChange={(v) => setHeader({ ...header, siteAddress: v })} wide />
         </div>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Driver Name" value={header.driverName} onChange={(v) => setHeader({ ...header, driverName: v })} />
           <Field label="Vehicle Number" value={header.vehicleNumber} onChange={(v) => setHeader({ ...header, vehicleNumber: v })} />
           <Field label="Transport Charge" type="number" value={header.transportCharge} onChange={(v) => setHeader({ ...header, transportCharge: v })} />
@@ -2810,7 +2810,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
           <span style={{ width: 32 }} />
         </div>
         {lines.map((l, idx) => (
-          <div key={idx} style={styles.lineRow}>
+          <div key={idx} className="line-row" style={styles.lineRow}>
             <select style={{ ...styles.select, flex: 3 }} value={l.itemId} onChange={(e) => setLine(idx, { itemId: e.target.value })}>
               <option value="">Select item…</option>
               {data.items.map((it) => (
@@ -3011,7 +3011,7 @@ function ReturnEntry({ data, persist, markTyping }) {
 
       <Panel title={editingId ? `Editing Return Challan No. ${data.returnChallans.find((c) => c.id === editingId)?.returnChallanNo ?? ""}` : "New Return Challan"}>
         {duplicateReturnNo && <Notice text={`Return No. ${returnNoInput} is already used by another return challan.`} />}
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Return No." type="number" value={returnNoInput} onChange={setReturnNoInput} />
           <Field label="Return Date" type="date" value={header.date} onChange={(v) => setHeader({ ...header, date: v })} />
           <SelectField
@@ -3037,7 +3037,7 @@ function ReturnEntry({ data, persist, markTyping }) {
             {lines.map((l, idx) => {
               const options = l.itemId ? pendingChallans(data, header.partyId, l.itemId, editingId) : [];
               return (
-                <div key={idx} style={styles.lineRow}>
+                <div key={idx} className="line-row" style={styles.lineRow}>
                   <select style={{ ...styles.select, flex: 2 }} value={l.itemId} onChange={(e) => setLine(idx, { itemId: e.target.value })}>
                     <option value="">Select item…</option>
                     {partyItems.map((it) => (
@@ -3309,7 +3309,7 @@ function InvoiceBuilder({ data, persist, markTyping }) {
 
       <Panel title="Billing Window">
         {duplicateInvoiceNo && <Notice text={`Invoice No. ${invoiceNoInput} is already used by another invoice.`} />}
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Invoice No." type="number" value={invoiceNoInput} onChange={setInvoiceNoInput} />
           <SelectField label="Party" value={partyId} onChange={setPartyId} options={data.parties.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))} />
           <Field label="Billing Start Date" type="date" value={billStart} onChange={setBillStart} />
@@ -3376,7 +3376,7 @@ function InvoiceBuilder({ data, persist, markTyping }) {
                     <span style={{ width: 32, flexShrink: 0 }} />
                   </div>
                   {(editableLines || []).map((l, idx) => (
-                    <div key={idx} style={{ ...styles.lineRow, gap: 6, alignItems: "center", marginBottom: 6 }}>
+                    <div key={idx} className="line-row" style={{ ...styles.lineRow, gap: 6, alignItems: "center", marginBottom: 6 }}>
                       <span style={{ width: 24, flexShrink: 0, fontSize: 12, color: COLORS.muted }}>{idx + 1}</span>
                       <input
                         style={{ ...styles.input, flex: 3, minWidth: 110 }}
@@ -3764,7 +3764,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
       <PageHeader title="Bulk Invoice" subtitle="One billing window for every party — untick anyone you want to skip, review (and edit if needed) each invoice, then generate and download all invoices as a single zip. Each party gets two PDFs: the invoice, and a companion statement listing items still with that party plus their running balance, pulled from the Party Ledger." />
 
       <Panel title="Billing Window">
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Billing Start Date" type="date" value={billStart} onChange={setBillStart} />
           <Field label="Billing End Date" type="date" value={billEnd} onChange={setBillEnd} />
           <Field label="Invoice Date" type="date" value={invoiceDate} onChange={setInvoiceDate} />
@@ -3872,7 +3872,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
                           <span style={{ width: 32, flexShrink: 0 }} />
                         </div>
                         {(edit?.lines || []).map((l, idx) => (
-                          <div key={idx} style={{ ...styles.lineRow, gap: 6, alignItems: "center", marginBottom: 6 }}>
+                          <div key={idx} className="line-row" style={{ ...styles.lineRow, gap: 6, alignItems: "center", marginBottom: 6 }}>
                             <span style={{ width: 24, flexShrink: 0, fontSize: 12, color: COLORS.muted }}>{idx + 1}</span>
                             <input style={{ ...styles.input, flex: 3, minWidth: 110 }} placeholder="Item description" value={l.itemName} onChange={(e) => editLineFor(party.id, idx, { itemName: e.target.value })} />
                             <input style={{ ...styles.input, flex: 1, minWidth: 55 }} type="number" placeholder="Qty" value={l.qty} onChange={(e) => editLineFor(party.id, idx, { qty: e.target.value })} />
@@ -4545,7 +4545,7 @@ function PartyLedger({ data, persist, markTyping }) {
       <PageHeader title="Party Ledger" subtitle="Full history for one party — deliveries, returns, and invoices, in a single timeline." />
 
       <Panel title="Select Party">
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <SelectField
             label="Party"
             value={partyId}
@@ -4560,7 +4560,7 @@ function PartyLedger({ data, persist, markTyping }) {
       {party && (
         <>
           <Panel title="Opening Balance" hint="What this party already owed before starting on this system — carried forward into Balance Due below.">
-            <div style={styles.formRow}>
+            <div className="form-row" style={styles.formRow}>
               <Field
                 label="Opening Balance (₹)"
                 type="number"
@@ -4588,7 +4588,7 @@ function PartyLedger({ data, persist, markTyping }) {
           </div>
 
           <Panel title="Record a Payment" hint="Simple record-keeping — no receipts or gateway integration">
-            <div style={styles.formRow}>
+            <div className="form-row" style={styles.formRow}>
               <Field label="Date" type="date" value={paymentForm.date} onChange={(v) => setPaymentForm({ ...paymentForm, date: v })} />
               <Field label="Amount (₹)" type="number" value={paymentForm.amount} placeholder="0" onChange={(v) => setPaymentForm({ ...paymentForm, amount: v })} />
               <SelectField
@@ -4999,7 +4999,7 @@ function Expenses({ data, persist, markTyping }) {
       <PageHeader title="Expenses" subtitle="Log spending and see a period balance sheet — total spend vs. payments received from parties." />
 
       <Panel title="Log an Expense">
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Date" type="date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} />
           <SelectField
             label="Category"
@@ -5016,7 +5016,7 @@ function Expenses({ data, persist, markTyping }) {
             <Plus size={14} /> Add custom category
           </button>
         ) : (
-          <div style={styles.formRow}>
+          <div className="form-row" style={styles.formRow}>
             <Field label="New category" value={customCategory} placeholder="e.g. Equipment Purchase" onChange={setCustomCategory} wide />
             <button style={styles.primaryBtn} onClick={addCustomCategory}>
               <CheckCircle2 size={15} /> Add
@@ -5035,7 +5035,7 @@ function Expenses({ data, persist, markTyping }) {
       </Panel>
 
       <Panel title="Balance Sheet" hint="Pick a period to see spend vs. payments received">
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="From" type="date" value={periodStart} onChange={setPeriodStart} />
           <Field label="To" type="date" value={periodEnd} onChange={setPeriodEnd} />
         </div>
@@ -5288,16 +5288,16 @@ function CompanySettings({ data, persist, markTyping }) {
     <div>
       <PageHeader title="Company Settings" subtitle="This is the letterhead printed on every invoice — name, tagline, address and contact." />
       <Panel title="Letterhead">
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Company Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} wide />
         </div>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Tagline" value={form.tagline} onChange={(v) => setForm({ ...form, tagline: v })} wide />
         </div>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} wide />
         </div>
-        <div style={styles.formRow}>
+        <div className="form-row" style={styles.formRow}>
           <Field label="Email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
           <Field label="Company GSTIN" value={form.gstin} onChange={(v) => setForm({ ...form, gstin: v })} placeholder="e.g. 24AAAAA0000A1Z5" />
         </div>
