@@ -5829,25 +5829,26 @@ const globalCss = `
       flex-direction: column;
       position: relative;
       background: ${COLORS.panel};
-      border-radius: 12px !important;
+      border-radius: 10px !important;
       box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
-      padding: 14px 16px !important;
-      margin-bottom: 10px;
+      padding: 10px 12px !important;
+      margin-bottom: 8px;
     }
     .ui-table td {
       display: flex !important;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 14px;
-      padding: 5px 0 !important;
+      gap: 10px;
+      padding: 3px 0 !important;
       border: none !important;
       text-align: right;
       white-space: normal !important;
-      font-size: 13px;
+      font-size: 12.5px;
+      line-height: 1.35;
     }
     .ui-table td[data-label]::before {
       content: attr(data-label);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: ${COLORS.muted};
       text-align: left;
@@ -5871,11 +5872,11 @@ const globalCss = `
       justify-content: space-between;
       align-items: center;
       order: -1;
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
       color: ${COLORS.ink};
-      padding: 0 40px 8px 0 !important;
-      margin-bottom: 6px;
+      padding: 0 34px 6px 0 !important;
+      margin-bottom: 4px;
       border-bottom: 1px solid rgba(0,0,0,0.06) !important;
     }
     .ui-table td[data-rec="title"]::before { display: none; }
@@ -5889,9 +5890,9 @@ const globalCss = `
     /* Row serial number becomes a small badge in the card's corner */
     .ui-table td[data-rec="serial"] {
       position: absolute;
-      top: 12px; right: 14px;
+      top: 9px; right: 11px;
       display: block !important;
-      font-size: 11px;
+      font-size: 10px;
       color: ${COLORS.muted};
       opacity: 0.55;
       padding: 0 !important;
