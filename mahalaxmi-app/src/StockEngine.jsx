@@ -5,6 +5,20 @@ import { supabase } from "./supabaseClient";
 
 const STORAGE_KEY = "mlx-stockengine-v1";
 
+// Wraps any button handler with a native confirmation prompt. Used on every
+// clickable button across the app (per product decision — even low-stakes
+// actions like "Add line" or "Cancel" ask first) so nothing fires from a
+// stray or accidental tap. Returns a new handler that only calls `action`
+// if the user confirms; any arguments React passes (e.g. the click event)
+// are forwarded through untouched.
+function confirmClick(action, message = "Are you sure?") {
+  return (...args) => {
+    if (window.confirm(message)) {
+      action(...args);
+    }
+  };
+}
+
 // Renders its children into a dedicated DOM node appended directly to
 // <body>, completely outside the app's own tree (app-shell > main-content >
 // ...). This matters for printing: our print CSS hides the whole app-shell
@@ -214,7 +228,7 @@ function SortToggle({ value, onChange, options, style }) {
       {options.map((opt) => (
         <button
           key={opt.value}
-          onClick={() => onChange(opt.value)}
+          onClick={confirmClick(() => onChange(opt.value), "Are you sure?")}
           style={{
             ...styles.ghostBtn,
             ...(value === opt.value ? { background: COLORS.amber, color: "#fff", borderColor: COLORS.amber } : {}),
@@ -1587,7 +1601,7 @@ export default function StockEngine({ session, onLogout }) {
       <div className="mobile-topbar">
         <button
           className="mobile-menu-btn"
-          onClick={() => setMoreOpen(true)}
+          onClick={confirmClick(() => setMoreOpen(true), "Are you sure?")}
           aria-label="Open menu"
         >
           <Menu size={20} strokeWidth={2} />
@@ -1601,7 +1615,7 @@ export default function StockEngine({ session, onLogout }) {
       </div>
 
       {/* Backdrop, only shown on mobile when the drawer is open */}
-      {navOpen && <div className="mobile-backdrop" onClick={() => setNavOpen(false)} />}
+      {navOpen && <div className="mobile-backdrop" onClick={confirmClick(() => setNavOpen(false), "Are you sure?")} />}
 
       <aside className={`sidebar${navOpen ? " sidebar-open" : ""}`} style={styles.sidebar}>
         <div style={styles.brand}>
@@ -1612,7 +1626,7 @@ export default function StockEngine({ session, onLogout }) {
           </div>
           <button
             className="mobile-close-btn"
-            onClick={() => setNavOpen(false)}
+            onClick={confirmClick(() => setNavOpen(false), "Are you sure?")}
             aria-label="Close menu"
           >
             <X size={18} strokeWidth={2} />
@@ -1625,10 +1639,10 @@ export default function StockEngine({ session, onLogout }) {
             return (
               <button
                 key={n.id}
-                onClick={() => {
+                onClick={confirmClick(() => {
                   setTab(n.id);
                   setNavOpen(false); // close drawer after picking a page on mobile
-                }}
+                }, "Are you sure?")}
                 style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}
               >
                 <Icon size={16} strokeWidth={2} />
@@ -1644,7 +1658,7 @@ export default function StockEngine({ session, onLogout }) {
             </div>
           )}
           <button
-            onClick={onLogout}
+            onClick={confirmClick(onLogout, "Log out of your account?")}
             style={{ ...styles.navBtn, width: "100%", justifyContent: "flex-start" }}
           >
             <LogOut size={16} strokeWidth={2} />
@@ -1692,7 +1706,7 @@ export default function StockEngine({ session, onLogout }) {
             <button
               key={t.id}
               className={tab === t.id ? "active" : ""}
-              onClick={() => { setTab(t.id); setMoreOpen(false); }}
+              onClick={confirmClick(() => { setTab(t.id); setMoreOpen(false); }, "Are you sure?")}
             >
               <Icon size={19} strokeWidth={2} />
               {t.label}
@@ -1701,7 +1715,7 @@ export default function StockEngine({ session, onLogout }) {
         })}
         <button
           className={moreOpen ? "active" : ""}
-          onClick={() => setMoreOpen((v) => !v)}
+          onClick={confirmClick(() => setMoreOpen((v) => !v), "Are you sure?")}
         >
           <Menu size={19} strokeWidth={2} />
           More
@@ -1711,7 +1725,7 @@ export default function StockEngine({ session, onLogout }) {
       {/* ---- "More" sheet: every remaining section ---- */}
       {moreOpen && (
         <>
-          <div className="more-sheet-backdrop" onClick={() => setMoreOpen(false)} />
+          <div className="more-sheet-backdrop" onClick={confirmClick(() => setMoreOpen(false), "Are you sure?")} />
           <div className="more-sheet">
             <div className="grabber" />
             {nav
@@ -1722,14 +1736,14 @@ export default function StockEngine({ session, onLogout }) {
                   <button
                     key={n.id}
                     className={tab === n.id ? "active" : ""}
-                    onClick={() => { setTab(n.id); setMoreOpen(false); }}
+                    onClick={confirmClick(() => { setTab(n.id); setMoreOpen(false); }, "Are you sure?")}
                   >
                     <Icon size={17} strokeWidth={2} />
                     {n.label}
                   </button>
                 );
               })}
-            <button onClick={onLogout}>
+            <button onClick={confirmClick(onLogout, "Log out of your account?")}>
               <LogOut size={17} strokeWidth={2} />
               Log out
             </button>
@@ -1754,7 +1768,7 @@ function SaveStatus({ saveState, retrySave }) {
         <span style={{ color: "#e0745a", display: "flex", alignItems: "center", gap: 6 }}>
           <AlertCircle size={13} /> Not saved
           <button
-            onClick={retrySave}
+            onClick={confirmClick(retrySave, "Retry saving now?")}
             style={{
               background: "transparent", border: "1px solid #e0745a", borderRadius: 4,
               color: "#e0745a", fontSize: 10.5, padding: "1px 6px", cursor: "pointer",
@@ -2221,7 +2235,7 @@ function Dashboard({ data }) {
           return (
             <div>
               <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented")}>
+                <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={confirmClick(() => triggerPrint("dashboard-rented", "print-portal--dashboard-rented"), "Generate and download the PDF?")}>
                   <Printer size={13} /> {exportingKey === "dashboard-rented" ? "Generating…" : "Download PDF"}
                 </button>
               </div>
@@ -2260,7 +2274,7 @@ function Dashboard({ data }) {
           return (
             <div>
               <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-                <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot")}>
+                <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={confirmClick(() => triggerPrint("dashboard-depot", "print-portal--dashboard-depot"), "Generate and download the PDF?")}>
                   <Printer size={13} /> {exportingKey === "dashboard-depot" ? "Generating…" : "Download PDF"}
                 </button>
               </div>
@@ -2303,7 +2317,7 @@ function Dashboard({ data }) {
         return (
           <div>
             <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("dashboard-pending", "print-portal--dashboard-pending")}>
+              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={confirmClick(() => triggerPrint("dashboard-pending", "print-portal--dashboard-pending"), "Generate and download the PDF?")}>
                 <Printer size={13} /> {exportingKey === "dashboard-pending" ? "Generating…" : "Download PDF"}
               </button>
             </div>
@@ -2462,10 +2476,10 @@ function PartyMaster({ data, persist, markTyping }) {
                 {(form.references || [""]).length > 1 && (
                   <button
                     style={{ ...styles.iconBtn, color: COLORS.danger }}
-                    onClick={() => {
+                    onClick={confirmClick(() => {
                       const refs = (form.references || [""]).filter((_, i) => i !== idx);
                       setForm({ ...form, references: refs });
-                    }}
+                    }, "Are you sure?")}
                   >
                     <X size={13} />
                   </button>
@@ -2474,7 +2488,7 @@ function PartyMaster({ data, persist, markTyping }) {
             ))}
             <button
               style={{ ...styles.ghostBtn, marginTop: 2, fontSize: 11.5 }}
-              onClick={() => setForm({ ...form, references: [...(form.references || [""]), ""] })}
+              onClick={confirmClick(() => setForm({ ...form, references: [...(form.references || [""]), ""] }), "Are you sure?")}
             >
               <Plus size={12} /> Add Reference
             </button>
@@ -2506,10 +2520,10 @@ function PartyMaster({ data, persist, markTyping }) {
           )}
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button style={styles.primaryBtn} onClick={add}>
+          <button style={styles.primaryBtn} onClick={confirmClick(add, "Add this record?")}>
             {editingId ? <><CheckCircle2 size={15} /> Save Changes</> : <><Plus size={15} /> Add Party</>}
           </button>
-          {editingId && <button style={styles.ghostBtn} onClick={cancelEdit}>Cancel</button>}
+          {editingId && <button style={styles.ghostBtn} onClick={confirmClick(cancelEdit, "Cancel editing and discard changes?")}>Cancel</button>}
         </div>
       </Panel>
 
@@ -2532,7 +2546,7 @@ function PartyMaster({ data, persist, markTyping }) {
                 ? <span style={styles.tinyTag}>{p.gstType === "IGST" ? "IGST 18%" : "CGST+SGST 18%"}</span>
                 : <span style={{ color: COLORS.muted, fontSize: 12 }}>—</span>,
               <div style={{ display: "flex", gap: 6 }}>
-                <button style={styles.ghostBtn} onClick={() => startEdit(p)}>Edit</button>
+                <button style={styles.ghostBtn} onClick={confirmClick(() => startEdit(p), "Edit this record?")}>Edit</button>
                 <ConfirmDelete
                   id={p.id}
                   confirmId={confirmDeleteId}
@@ -2607,10 +2621,10 @@ function ItemMaster({ data, persist, markTyping }) {
           <Field label="Total Depot Stock" value={form.totalDepotStock} onChange={(v) => setForm({ ...form, totalDepotStock: v })} type="number" />
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button style={styles.primaryBtn} onClick={add}>
+          <button style={styles.primaryBtn} onClick={confirmClick(add, "Add this record?")}>
             {editingId ? <><CheckCircle2 size={15} /> Save Changes</> : <><Plus size={15} /> Add Item</>}
           </button>
-          {editingId && <button style={styles.ghostBtn} onClick={cancelEdit}>Cancel</button>}
+          {editingId && <button style={styles.ghostBtn} onClick={confirmClick(cancelEdit, "Cancel editing and discard changes?")}>Cancel</button>}
         </div>
       </Panel>
 
@@ -2630,7 +2644,7 @@ function ItemMaster({ data, persist, markTyping }) {
                 it.serviceCharge,
                 it.totalDepotStock,
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button style={styles.ghostBtn} onClick={() => startEdit(it)}>Edit</button>
+                  <button style={styles.ghostBtn} onClick={confirmClick(() => startEdit(it), "Edit this record?")}>Edit</button>
                   <ConfirmDelete
                     id={it.id}
                     confirmId={confirmDeleteId}
@@ -2819,17 +2833,17 @@ function DeliveryEntry({ data, persist, markTyping }) {
             </select>
             <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={l.qty} onChange={(e) => setLine(idx, { qty: e.target.value })} />
             <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Rate" value={l.rate} onChange={(e) => setLine(idx, { rate: e.target.value })} />
-            <button style={styles.iconBtn} onClick={() => removeLine(idx)} disabled={lines.length === 1}><Trash2 size={14} /></button>
+            <button style={styles.iconBtn} onClick={confirmClick(() => removeLine(idx), "Remove this line?")} disabled={lines.length === 1}><Trash2 size={14} /></button>
           </div>
         ))}
-        <button style={styles.ghostBtn} onClick={addLine}><Plus size={14} /> Add line</button>
+        <button style={styles.ghostBtn} onClick={confirmClick(addLine, "Add a new line?")}><Plus size={14} /> Add line</button>
 
         <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
-          <button style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }} disabled={!canSave} onClick={save}>
+          <button style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }} disabled={!canSave} onClick={confirmClick(save, "Save this entry?")}>
             <CheckCircle2 size={15} /> {editingId ? "Update Challan" : "Save Challan"}
           </button>
           {editingId && (
-            <button style={styles.ghostBtn} onClick={cancelEdit}><X size={13} /> Cancel Edit</button>
+            <button style={styles.ghostBtn} onClick={confirmClick(cancelEdit, "Cancel editing and discard changes?")}><X size={13} /> Cancel Edit</button>
           )}
         </div>
       </Panel>
@@ -2863,7 +2877,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
                 fmtDateTime(c.updatedAt || c.createdAt),
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button style={styles.iconBtn} onClick={() => startEdit(c)} title="Edit challan"><Pencil size={14} /></button>
+                  <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit challan"><Pencil size={14} /></button>
                   <ConfirmDelete
                     id={c.id}
                     confirmId={confirmDeleteId}
@@ -3056,20 +3070,20 @@ function ReturnEntry({ data, persist, markTyping }) {
                     ))}
                   </select>
                   <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Qty" value={l.qty} onChange={(e) => setLine(idx, { qty: e.target.value })} />
-                  <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="0" value={l.brokenQty} onChange={(e) => setLine(idx, { brokenQty: e.target.value })} />
-                  <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="0" value={l.brokenRate} onChange={(e) => setLine(idx, { brokenRate: e.target.value })} />
-                  <button style={styles.iconBtn} onClick={() => removeLine(idx)} disabled={lines.length === 1}><Trash2 size={14} /></button>
+                  <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Broken Qty" value={l.brokenQty} onChange={(e) => setLine(idx, { brokenQty: e.target.value })} />
+                  <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Broken Rate" value={l.brokenRate} onChange={(e) => setLine(idx, { brokenRate: e.target.value })} />
+                  <button style={styles.iconBtn} onClick={confirmClick(() => removeLine(idx), "Remove this line?")} disabled={lines.length === 1}><Trash2 size={14} /></button>
                 </div>
               );
             })}
-            <button style={styles.ghostBtn} onClick={addLine}><Plus size={14} /> Add line</button>
+            <button style={styles.ghostBtn} onClick={confirmClick(addLine, "Add a new line?")}><Plus size={14} /> Add line</button>
 
             <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
-              <button style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }} disabled={!canSave} onClick={save}>
+              <button style={{ ...styles.primaryBtn, opacity: canSave ? 1 : 0.5 }} disabled={!canSave} onClick={confirmClick(save, "Save this entry?")}>
                 <CheckCircle2 size={15} /> {editingId ? "Update Return" : "Save Return"}
               </button>
               {editingId && (
-                <button style={styles.ghostBtn} onClick={cancelEdit}><X size={13} /> Cancel Edit</button>
+                <button style={styles.ghostBtn} onClick={confirmClick(cancelEdit, "Cancel editing and discard changes?")}><X size={13} /> Cancel Edit</button>
               )}
             </div>
           </>
@@ -3105,7 +3119,7 @@ function ReturnEntry({ data, persist, markTyping }) {
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
                 fmtDateTime(c.updatedAt || c.createdAt),
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button style={styles.iconBtn} onClick={() => startEdit(c)} title="Edit return"><Pencil size={14} /></button>
+                  <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit return"><Pencil size={14} /></button>
                   <ConfirmDelete
                     id={c.id}
                     confirmId={confirmDeleteId}
@@ -3335,11 +3349,11 @@ function InvoiceBuilder({ data, persist, markTyping }) {
               {/* Edit mode toggle bar */}
               <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
                 {!editMode ? (
-                  <button style={styles.ghostBtn} onClick={enterEditMode}><Pencil size={13} /> Manually Edit Lines</button>
+                  <button style={styles.ghostBtn} onClick={confirmClick(enterEditMode, "Enter edit mode?")}><Pencil size={13} /> Manually Edit Lines</button>
                 ) : (
                   <>
                     <span style={{ ...styles.tinyTag, background: "#fff3cd", color: "#856404", padding: "3px 8px", fontSize: 11.5 }}>✏️ Edit Mode</span>
-                    <button style={styles.ghostBtn} onClick={exitEditMode}><X size={13} /> Reset to Auto-Calculated</button>
+                    <button style={styles.ghostBtn} onClick={confirmClick(exitEditMode, "Exit edit mode? Unsaved changes may be lost.")}><X size={13} /> Reset to Auto-Calculated</button>
                   </>
                 )}
               </div>
@@ -3431,10 +3445,10 @@ function InvoiceBuilder({ data, persist, markTyping }) {
                         value={l.amount}
                         onChange={(e) => setEditLine(idx, { amount: e.target.value })}
                       />
-                      <button style={{ ...styles.iconBtn, flexShrink: 0 }} onClick={() => removeEditLine(idx)} title="Remove line"><Trash2 size={13} /></button>
+                      <button style={{ ...styles.iconBtn, flexShrink: 0 }} onClick={confirmClick(() => removeEditLine(idx), "Remove this line?")} title="Remove line"><Trash2 size={13} /></button>
                     </div>
                   ))}
-                  <button style={styles.ghostBtn} onClick={addEditLine}><Plus size={13} /> Add Row</button>
+                  <button style={styles.ghostBtn} onClick={confirmClick(addEditLine, "Add a new line?")}><Plus size={13} /> Add Row</button>
 
                   {/* Transport & Deposit overrides */}
                   <div style={{ marginTop: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -3483,7 +3497,7 @@ function InvoiceBuilder({ data, persist, markTyping }) {
                   </>
                 )}
               </div>
-              <button style={{ ...styles.primaryBtn, marginTop: 14 }} onClick={save}>
+              <button style={{ ...styles.primaryBtn, marginTop: 14 }} onClick={confirmClick(save, "Save this entry?")}>
                 <CheckCircle2 size={15} /> Finalize & Save Invoice #{invoiceNoInput || data.seq.invoice}
               </button>
             </Panel>
@@ -3781,8 +3795,8 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
             hint="All billable parties are selected by default — untick any you want to leave out of this run."
           >
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <button style={styles.ghostBtn} onClick={selectAll}>Select All</button>
-              <button style={styles.ghostBtn} onClick={selectNone}>Select None</button>
+              <button style={styles.ghostBtn} onClick={confirmClick(selectAll, "Select all?")}>Select All</button>
+              <button style={styles.ghostBtn} onClick={confirmClick(selectNone, "Clear the selection?")}>Select None</button>
             </div>
             <div className="table-wrap">
               <Table
@@ -3814,7 +3828,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
             <button
               style={{ ...styles.primaryBtn, marginTop: 14 }}
               disabled={selected.length === 0}
-              onClick={goToReview}
+              onClick={confirmClick(goToReview, "Continue to review?")}
             >
               <FileText size={15} /> Review {selected.length} Invoice{selected.length === 1 ? "" : "s"} Before Download
             </button>
@@ -3824,7 +3838,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
             title={`Review ${selected.length} Invoice${selected.length === 1 ? "" : "s"}`}
             hint="Expand a party to edit its lines, transport, or deposit — same as Create Invoice's edit mode. Nothing is saved or downloaded until you confirm below."
           >
-            <button style={{ ...styles.ghostBtn, marginBottom: 12 }} onClick={backToSelect}>
+            <button style={{ ...styles.ghostBtn, marginBottom: 12 }} onClick={confirmClick(backToSelect, "Go back? Your review progress will be lost.")}>
               <X size={13} /> Back to Party Selection
             </button>
 
@@ -3845,7 +3859,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
                       display: "flex", alignItems: "center", justifyContent: "space-between",
                       padding: "10px 14px", background: COLORS.bg, cursor: "pointer", flexWrap: "wrap", gap: 8,
                     }}
-                    onClick={() => setExpandedPartyId(isExpanded ? null : party.id)}
+                    onClick={confirmClick(() => setExpandedPartyId(isExpanded ? null : party.id), "Toggle this party's details?")}
                   >
                     <span style={{ fontWeight: 700, fontSize: 13.5, fontFamily: "'Public Sans', system-ui, sans-serif", color: COLORS.ink }}>
                       {isExpanded ? "▾" : "▸"} {party.code} — {party.name}{" "}
@@ -3857,7 +3871,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
                   </div>
 
                   {isExpanded && (
-                    <div style={{ padding: 14 }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ padding: 14 }} onClick={confirmClick((e) => e.stopPropagation(), "Are you sure?")}>
                       <div style={{ overflowX: "auto" }}>
                         <div className="line-header-row" style={{ ...styles.lineHeaderRow, gap: 6 }}>
                           <span style={{ width: 24, flexShrink: 0 }}>#</span>
@@ -3882,12 +3896,12 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
                             <input style={{ ...styles.input, flex: 1, minWidth: 70 }} type="date" value={l.end} onChange={(e) => editLineFor(party.id, idx, { end: e.target.value })} />
                             <input style={{ ...styles.input, flex: 1, minWidth: 50 }} type="number" placeholder="Days" value={l.days} onChange={(e) => editLineFor(party.id, idx, { days: e.target.value })} />
                             <input style={{ ...styles.input, flex: 1, minWidth: 75, fontWeight: 600 }} type="number" placeholder="Amount" value={l.amount} onChange={(e) => editLineFor(party.id, idx, { amount: e.target.value })} />
-                            <button style={{ ...styles.iconBtn, flexShrink: 0 }} onClick={() => removeLineFor(party.id, idx)} title="Remove line"><Trash2 size={13} /></button>
+                            <button style={{ ...styles.iconBtn, flexShrink: 0 }} onClick={confirmClick(() => removeLineFor(party.id, idx), "Remove this line?")} title="Remove line"><Trash2 size={13} /></button>
                           </div>
                         ))}
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button style={styles.ghostBtn} onClick={() => addLineFor(party.id)}><Plus size={13} /> Add Row</button>
-                          <button style={styles.ghostBtn} onClick={() => resetPartyEdit(party.id, result)}><X size={13} /> Reset to Auto-Calculated</button>
+                          <button style={styles.ghostBtn} onClick={confirmClick(() => addLineFor(party.id), "Add a new line?")}><Plus size={13} /> Add Row</button>
+                          <button style={styles.ghostBtn} onClick={confirmClick(() => resetPartyEdit(party.id, result), "Discard changes for this party?")}><X size={13} /> Reset to Auto-Calculated</button>
                         </div>
 
                         <div style={{ marginTop: 14, display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -3949,7 +3963,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
             <button
               style={{ ...styles.primaryBtn, marginTop: 14 }}
               disabled={generating || selected.length === 0}
-              onClick={confirmAndDownload}
+              onClick={confirmClick(confirmAndDownload, "Confirm and download the invoices?")}
             >
               <Archive size={15} />
               {generating
@@ -4047,13 +4061,13 @@ function InvoiceArchive({ data, persist }) {
     confirmVoidId === inv.id ? (
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Void this invoice?</span>
-        <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => voidInvoice(inv.id)} title="Confirm void"><CheckCircle2 size={14} /></button>
-        <button style={styles.iconBtn} onClick={() => setConfirmVoidId(null)} title="Cancel"><X size={14} /></button>
+        <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={confirmClick(() => voidInvoice(inv.id), "Void this invoice? This cannot be undone.")} title="Confirm void"><CheckCircle2 size={14} /></button>
+        <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmVoidId(null), "Are you sure?")} title="Cancel"><X size={14} /></button>
       </div>
     ) : (
       <div style={{ display: "flex", gap: 6 }}>
-        <button style={styles.ghostBtn} onClick={() => setSelectedId(inv.id)}><Printer size={13} /> View</button>
-        <button style={styles.iconBtn} onClick={() => setConfirmVoidId(inv.id)} title="Void invoice"><Ban size={14} /></button>
+        <button style={styles.ghostBtn} onClick={confirmClick(() => setSelectedId(inv.id), "Are you sure?")}><Printer size={13} /> View</button>
+        <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmVoidId(inv.id), "Are you sure?")} title="Void invoice"><Ban size={14} /></button>
       </div>
     ),
   ];
@@ -4090,7 +4104,7 @@ function InvoiceArchive({ data, persist }) {
                 return (
                   <div key={group.key} style={{ marginBottom: 16 }}>
                     <button
-                      onClick={() => toggleMonth(group.key)}
+                      onClick={confirmClick(() => toggleMonth(group.key), "Toggle this month's details?")}
                       style={{
                         display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
                         background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8,
@@ -4339,7 +4353,7 @@ function InvoicePrintView({ data, invoice }) {
   return (
     <Panel title={`Invoice #${invoice.invoiceNo}`}>
       <div className="no-print" style={{ marginBottom: 14 }}>
-        <button style={styles.primaryBtn} disabled={exporting} onClick={handlePrint}>
+        <button style={styles.primaryBtn} disabled={exporting} onClick={confirmClick(handlePrint, "Generate and download this PDF?")}>
           <Printer size={15} /> {exporting ? "Generating…" : "Download PDF (Invoice + Pending Items & Balance)"}
         </button>
       </div>
@@ -4570,7 +4584,7 @@ function PartyLedger({ data, persist, markTyping }) {
               />
               <button
                 style={{ ...styles.primaryBtn, alignSelf: "flex-end" }}
-                onClick={saveOpeningBalance}
+                onClick={confirmClick(saveOpeningBalance, "Save the opening balance?")}
                 disabled={!openingBalanceDirty}
               >
                 <CheckCircle2 size={15} /> Save
@@ -4599,7 +4613,7 @@ function PartyLedger({ data, persist, markTyping }) {
               />
               <Field label="Note" value={paymentForm.note} placeholder="e.g. cheque no." onChange={(v) => setPaymentForm({ ...paymentForm, note: v })} wide />
             </div>
-            <button style={{ ...styles.primaryBtn, opacity: canSavePayment ? 1 : 0.5 }} disabled={!canSavePayment} onClick={addPayment}>
+            <button style={{ ...styles.primaryBtn, opacity: canSavePayment ? 1 : 0.5 }} disabled={!canSavePayment} onClick={confirmClick(addPayment, "Add this payment?")}>
               <CheckCircle2 size={15} /> Save Payment
             </button>
 
@@ -4660,7 +4674,7 @@ function PartyLedger({ data, persist, markTyping }) {
             return (
               <div>
                 <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} disabled={!!exportingKey} onClick={() => triggerPrint("ledger-rented", "print-portal--ledger-rented")}>
+                  <button style={styles.primaryBtn} disabled={!!exportingKey} onClick={confirmClick(() => triggerPrint("ledger-rented", "print-portal--ledger-rented"), "Generate and download the PDF?")}>
                     <Printer size={15} /> {exportingKey === "ledger-rented" ? "Generating…" : "Download PDF"}
                   </button>
                 </div>
@@ -4702,7 +4716,7 @@ function PartyLedger({ data, persist, markTyping }) {
             return (
               <div>
                 <div style={{ marginBottom: 10 }}>
-                  <button style={styles.primaryBtn} disabled={!!exportingKey} onClick={() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline")}>
+                  <button style={styles.primaryBtn} disabled={!!exportingKey} onClick={confirmClick(() => triggerPrint("ledger-timeline", "print-portal--ledger-timeline"), "Generate and download the PDF?")}>
                     <Printer size={15} /> {exportingKey === "ledger-timeline" ? "Generating…" : "Download PDF"}
                   </button>
                 </div>
@@ -4823,7 +4837,7 @@ function PartyBalances({ data }) {
         return (
           <div>
             <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("balances", "print-portal--party-balances")}>
+              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={confirmClick(() => triggerPrint("balances", "print-portal--party-balances"), "Generate and download the PDF?")}>
                 <Printer size={13} /> {exportingKey === "balances" ? "Generating…" : "Download PDF"}
               </button>
             </div>
@@ -4866,7 +4880,7 @@ function PartyBalances({ data }) {
         return (
           <div>
             <div className="no-print" style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={() => triggerPrint("payments", "print-portal--party-payments")}>
+              <button style={styles.ghostBtn} disabled={!!exportingKey} onClick={confirmClick(() => triggerPrint("payments", "print-portal--party-payments"), "Generate and download the PDF?")}>
                 <Printer size={13} /> {exportingKey === "payments" ? "Generating…" : "Download PDF"}
               </button>
             </div>
@@ -5012,23 +5026,23 @@ function Expenses({ data, persist, markTyping }) {
         </div>
 
         {!addingCustom ? (
-          <button style={styles.iconBtn} onClick={() => setAddingCustom(true)}>
+          <button style={styles.iconBtn} onClick={confirmClick(() => setAddingCustom(true), "Are you sure?")}>
             <Plus size={14} /> Add custom category
           </button>
         ) : (
           <div className="form-row" style={styles.formRow}>
             <Field label="New category" value={customCategory} placeholder="e.g. Equipment Purchase" onChange={setCustomCategory} wide />
-            <button style={styles.primaryBtn} onClick={addCustomCategory}>
+            <button style={styles.primaryBtn} onClick={confirmClick(addCustomCategory, "Add this category?")}>
               <CheckCircle2 size={15} /> Add
             </button>
-            <button style={styles.iconBtn} onClick={() => { setAddingCustom(false); setCustomCategory(""); }}>
+            <button style={styles.iconBtn} onClick={confirmClick(() => { setAddingCustom(false); setCustomCategory(""); }, "Are you sure?")}>
               <X size={14} />
             </button>
           </div>
         )}
 
         <div style={{ marginTop: 12 }}>
-          <button style={{ ...styles.primaryBtn, opacity: canSaveExpense ? 1 : 0.5 }} disabled={!canSaveExpense} onClick={addExpense}>
+          <button style={{ ...styles.primaryBtn, opacity: canSaveExpense ? 1 : 0.5 }} disabled={!canSaveExpense} onClick={confirmClick(addExpense, "Add this expense?")}>
             <CheckCircle2 size={15} /> Save Expense
           </button>
         </div>
@@ -5151,19 +5165,19 @@ function RecycleBin({ data, persist }) {
               confirmRestoreId === e.binId ? (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Restore this item?</span>
-                  <button style={{ ...styles.iconBtn, color: "#2e7d32", borderColor: "#2e7d32" }} onClick={() => restore(e.binId)} title="Confirm restore"><CheckCircle2 size={14} /></button>
-                  <button style={styles.iconBtn} onClick={() => setConfirmRestoreId(null)} title="Cancel"><X size={14} /></button>
+                  <button style={{ ...styles.iconBtn, color: "#2e7d32", borderColor: "#2e7d32" }} onClick={confirmClick(() => restore(e.binId), "Restore this item from the recycle bin?")} title="Confirm restore"><CheckCircle2 size={14} /></button>
+                  <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmRestoreId(null), "Are you sure?")} title="Cancel"><X size={14} /></button>
                 </div>
               ) : confirmPurgeId === e.binId ? (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Delete forever?</span>
-                  <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => purge(e.binId)} title="Confirm"><CheckCircle2 size={14} /></button>
-                  <button style={styles.iconBtn} onClick={() => setConfirmPurgeId(null)} title="Cancel"><X size={14} /></button>
+                  <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={confirmClick(() => purge(e.binId), "Permanently delete this item? This cannot be undone.")} title="Confirm"><CheckCircle2 size={14} /></button>
+                  <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmPurgeId(null), "Are you sure?")} title="Cancel"><X size={14} /></button>
                 </div>
               ) : (
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button style={styles.ghostBtn} onClick={() => setConfirmRestoreId(e.binId)}>Restore</button>
-                  <button style={styles.iconBtn} onClick={() => setConfirmPurgeId(e.binId)} title="Delete forever"><Trash2 size={14} /></button>
+                  <button style={styles.ghostBtn} onClick={confirmClick(() => setConfirmRestoreId(e.binId), "Are you sure?")}>Restore</button>
+                  <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmPurgeId(e.binId), "Are you sure?")} title="Delete forever"><Trash2 size={14} /></button>
                 </div>
               ),
             ])}
@@ -5229,7 +5243,7 @@ function BackupRestore({ data, persist }) {
         <p style={styles.plainText}>
           Downloads everything — parties, items, delivery & return challans, and saved invoices — as one JSON file.
         </p>
-        <button style={styles.primaryBtn} onClick={exportData}><Download size={15} /> Download Backup</button>
+        <button style={styles.primaryBtn} onClick={confirmClick(exportData, "Export all data as a backup file?")}><Download size={15} /> Download Backup</button>
       </Panel>
 
       <Panel title="Restore from Backup">
@@ -5253,11 +5267,11 @@ function BackupRestore({ data, persist }) {
         {confirmSeed ? (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span style={{ fontSize: 12.5, color: COLORS.danger, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Replace all current data with the Excel import?</span>
-            <button style={{ ...styles.primaryBtn, background: COLORS.danger }} onClick={reloadSeed}><CheckCircle2 size={14} /> Yes, reload it</button>
-            <button style={styles.ghostBtn} onClick={() => setConfirmSeed(false)}><X size={13} /> Cancel</button>
+            <button style={{ ...styles.primaryBtn, background: COLORS.danger }} onClick={confirmClick(reloadSeed, "Replace all current data with the Excel import? This cannot be undone.")}><CheckCircle2 size={14} /> Yes, reload it</button>
+            <button style={styles.ghostBtn} onClick={confirmClick(() => setConfirmSeed(false), "Are you sure?")}><X size={13} /> Cancel</button>
           </div>
         ) : (
-          <button style={styles.ghostBtn} onClick={() => setConfirmSeed(true)}><Upload size={14} /> Reload from Excel</button>
+          <button style={styles.ghostBtn} onClick={confirmClick(() => setConfirmSeed(true), "Are you sure?")}><Upload size={14} /> Reload from Excel</button>
         )}
       </Panel>
     </div>
@@ -5303,10 +5317,10 @@ function CompanySettings({ data, persist, markTyping }) {
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 4 }}>
-          <button style={{ ...styles.primaryBtn, opacity: dirty ? 1 : 0.5 }} disabled={!dirty} onClick={save}>
+          <button style={{ ...styles.primaryBtn, opacity: dirty ? 1 : 0.5 }} disabled={!dirty} onClick={confirmClick(save, "Save this entry?")}>
             <CheckCircle2 size={15} /> Save Letterhead
           </button>
-          <button style={styles.ghostBtn} onClick={resetDefaults}>Reset to default</button>
+          <button style={styles.ghostBtn} onClick={confirmClick(resetDefaults, "Reset all settings to default?")}>Reset to default</button>
           {saved && <span style={styles.okNotice}><CheckCircle2 size={14} /> Saved</span>}
         </div>
       </Panel>
@@ -5349,13 +5363,13 @@ function ConfirmDelete({ id, confirmId, setConfirmId, onConfirm, label = "Delete
     return (
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>{label}</span>
-        <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => onConfirm(id)} title="Confirm"><CheckCircle2 size={14} /></button>
-        <button style={styles.iconBtn} onClick={() => setConfirmId(null)} title="Cancel"><X size={14} /></button>
+        <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={confirmClick(() => onConfirm(id), "Are you sure?")} title="Confirm"><CheckCircle2 size={14} /></button>
+        <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmId(null), "Are you sure?")} title="Cancel"><X size={14} /></button>
       </div>
     );
   }
   return (
-    <button style={styles.iconBtn} onClick={() => setConfirmId(id)} title={title}><Icon size={14} /></button>
+    <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmId(id), "Are you sure?")} title={title}><Icon size={14} /></button>
   );
 }
 function useCountUp(value) {
