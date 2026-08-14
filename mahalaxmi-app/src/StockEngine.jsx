@@ -2893,6 +2893,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
             ) : (
             <Table
               cols={["Challan No.", "Date", "Party", "Items", "Last Changed", ""]}
+              titleCol={2}
               rows={sortedChallans.map((c) => [
                 c.challanNo,
                 fmtDateDisplay(c.date),
@@ -3137,6 +3138,7 @@ function ReturnEntry({ data, persist, markTyping }) {
             ) : (
             <Table
               cols={["Return No.", "Date", "Party", "Items", "Last Changed", ""]}
+              titleCol={2}
               rows={sortedChallans.map((c) => [
                 c.returnChallanNo,
                 fmtDateDisplay(c.date),
