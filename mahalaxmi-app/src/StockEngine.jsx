@@ -5440,8 +5440,22 @@ function Table({ cols, rows, serial = true }) {
   // (see .ui-table rules inside the max-width:768px block in globalCss).
   // data-rec marks which cell becomes the card title vs. the corner serial
   // badge vs. an ordinary label/value line; data-label feeds the ::before
-  // label text for ordinary cells.
+  // label text for ordinary cells. On mobile, cards start collapsed to just
+  // the title line — tapping a row (outside its action buttons) toggles it
+  // open to reveal the rest of the fields via the .ui-row-expanded class.
   const titleIdx = serial ? 1 : 0;
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggleRow = (i, e) => {
+    // Don't hijack taps on buttons/inputs/links inside the row (edit, delete,
+    // selects, etc.) — only bare taps on the card itself expand/collapse it.
+    if (e.target.closest("button, a, input, select, textarea, label")) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
   return (
     <div className="table-wrap" style={styles.tableWrap}>
       <table className="ui-table" style={styles.table}>
@@ -5450,7 +5464,12 @@ function Table({ cols, rows, serial = true }) {
         </thead>
         <tbody>
           {allRows.map((r, i) => (
-            <tr key={i} className="ui-row" style={{ ...styles.tr, animationDelay: `${Math.min(i, 12) * 22}ms` }}>
+            <tr
+              key={i}
+              className={`ui-row${expanded.has(i) ? " ui-row-expanded" : ""}`}
+              style={{ ...styles.tr, animationDelay: `${Math.min(i, 12) * 22}ms` }}
+              onClick={(e) => toggleRow(i, e)}
+            >
               {r.map((cell, j) => (
                 <td
                   key={j}
@@ -5813,6 +5832,7 @@ const globalCss = `
       box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
       padding: 14px 16px !important;
       margin-bottom: 10px;
+      cursor: pointer;
     }
     .ui-table td {
       display: flex !important;
@@ -5833,17 +5853,43 @@ const globalCss = `
       text-align: left;
       flex-shrink: 0;
     }
-    /* First real column becomes the card's title line */
+    /* Collapsed by default: only the title line shows, with a chevron hint. */
+    .ui-table tr:not(.ui-row-expanded) td[data-rec="field"] {
+      display: none !important;
+    }
+    .ui-row-expanded td[data-rec="field"] {
+      display: flex !important;
+    }
+    /* First real column becomes the card's title line (and tap target) */
     .ui-table td[data-rec="title"] {
-      display: block !important;
+      display: flex !important;
+      justify-content: space-between;
+      align-items: center;
       font-size: 15px;
       font-weight: 700;
       color: ${COLORS.ink};
-      padding: 0 46px 8px 0 !important;
+      padding: 0 46px 0 0 !important;
+    }
+    .ui-table td[data-rec="title"]::before { display: none; }
+    .ui-table td[data-rec="title"]::after {
+      content: "";
+      width: 7px; height: 7px;
+      flex-shrink: 0;
+      margin-left: 10px;
+      border-right: 2px solid ${COLORS.muted};
+      border-bottom: 2px solid ${COLORS.muted};
+      opacity: 0.55;
+      transform: rotate(45deg);
+      transition: transform 0.15s ease;
+    }
+    .ui-row-expanded td[data-rec="title"] {
+      padding-bottom: 8px !important;
       margin-bottom: 6px;
       border-bottom: 1px solid rgba(0,0,0,0.06) !important;
     }
-    .ui-table td[data-rec="title"]::before { display: none; }
+    .ui-row-expanded td[data-rec="title"]::after {
+      transform: rotate(225deg);
+    }
     /* Row serial number becomes a small badge in the card's corner */
     .ui-table td[data-rec="serial"] {
       position: absolute;
