@@ -5473,7 +5473,11 @@ function Table({ cols, rows, serial = true, titleCol = 0 }) {
                   data-label={allCols[j]}
                   data-rec={j === titleIdx ? "title" : (serial && j === 0) ? "serial" : "field"}
                 >
-                  {j === titleIdx ? <span className="ui-row-title-text">{cell}</span> : cell}
+                  {j === titleIdx ? (
+                    <span className="ui-row-title-text">{cell}</span>
+                  ) : (
+                    <span className="ui-row-value">{cell}</span>
+                  )}
                 </td>
               ))}
             </tr>
@@ -5847,6 +5851,18 @@ const globalCss = `
       color: ${COLORS.muted};
       text-align: left;
       flex-shrink: 0;
+      padding-top: 1px;
+    }
+    /* Value side of a label/value row — takes the remaining width and wraps
+       onto its own lines instead of overflowing into the label or the next
+       row (min-width:0 is what lets a flex item shrink below its content
+       size and actually wrap rather than overlap). */
+    .ui-table .ui-row-value {
+      flex: 1;
+      min-width: 0;
+      text-align: right;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     /* First real column becomes the card's title line, always visible */
     .ui-table td[data-rec="title"] {
