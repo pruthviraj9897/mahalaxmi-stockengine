@@ -5872,7 +5872,7 @@ const globalCss = `
       font-size: 15px;
       font-weight: 700;
       color: ${COLORS.ink};
-      padding-bottom: 8px !important;
+      padding: 0 40px 8px 0 !important;
       margin-bottom: 6px;
       border-bottom: 1px solid rgba(0,0,0,0.06) !important;
     }
