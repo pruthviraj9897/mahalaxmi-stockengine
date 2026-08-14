@@ -19,6 +19,21 @@ function confirmClick(action, message = "Are you sure?") {
   };
 }
 
+// Gives a form a ref for its results list plus a scrollToList() call to make
+// after a save, so the person lands on the row they just added/edited
+// instead of having to scroll down manually to find it. The rAF delay lets
+// the just-saved row render (new list item / re-sorted position) before we
+// measure and scroll to it.
+function useScrollToRef() {
+  const ref = useRef(null);
+  const scrollToList = useCallback(() => {
+    requestAnimationFrame(() => {
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+  return [ref, scrollToList];
+}
+
 // Renders its children into a dedicated DOM node appended directly to
 // <body>, completely outside the app's own tree (app-shell > main-content >
 // ...). This matters for printing: our print CSS hides the whole app-shell
@@ -2402,6 +2417,7 @@ function PartyMaster({ data, persist, markTyping }) {
   const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("partyForm", blank, data, persist, markTyping);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [listRef, scrollToList] = useScrollToRef();
 
   const add = () => {
     if (!form.name.trim()) return;
@@ -2423,6 +2439,7 @@ function PartyMaster({ data, persist, markTyping }) {
     // Draft-clear rides along in this same write, not a separate one.
     persist({ ...next, drafts: clearedDrafts() });
     resetFormLocal();
+    scrollToList();
   };
 
   const startEdit = (p) => {
@@ -2527,7 +2544,7 @@ function PartyMaster({ data, persist, markTyping }) {
         </div>
       </Panel>
 
-      <Panel title={`All Parties (${data.parties.length})`}>
+      <Panel panelRef={listRef} title={`All Parties (${data.parties.length})`}>
         {data.parties.length === 0 ? (
           <Empty text="No parties yet — add one above." />
         ) : (
@@ -2571,6 +2588,7 @@ function ItemMaster({ data, persist, markTyping }) {
   const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("itemForm", blank, data, persist, markTyping);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [listRef, scrollToList] = useScrollToRef();
 
   const add = () => {
     if (!form.name.trim()) return;
@@ -2594,6 +2612,7 @@ function ItemMaster({ data, persist, markTyping }) {
     }
     persist({ ...next, drafts: clearedDrafts() });
     resetFormLocal();
+    scrollToList();
   };
 
   const startEdit = (it) => {
@@ -2628,7 +2647,7 @@ function ItemMaster({ data, persist, markTyping }) {
         </div>
       </Panel>
 
-      <Panel title={`All Items (${data.items.length})`}>
+      <Panel panelRef={listRef} title={`All Items (${data.items.length})`}>
         {data.items.length === 0 ? (
           <Empty text="No items yet — add one above." />
         ) : (
@@ -2687,6 +2706,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [sortBy, setSortBy] = useState("date"); // "date" | "updated"
   const [filterPartyId, setFilterPartyId] = useState("");
+  const [listRef, scrollToList] = useScrollToRef();
 
   const setLine = (idx, patch) => {
     const next = [...lines];
@@ -2786,6 +2806,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
     persist({ ...next, drafts: clearedDrafts() });
     setEditingId(null);
     resetFormLocal({ header: emptyHeader, lines: emptyLines, challanNoInput: String(next.seq.delivery) });
+    scrollToList();
   };
 
   const duplicateChallanNo = data.deliveryChallans.some(
@@ -2848,7 +2869,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
         </div>
       </Panel>
 
-      <Panel title={`Delivery Challans (${sortedChallans.length}${filterPartyId ? ` of ${data.deliveryChallans.length}` : ""})`}>
+      <Panel panelRef={listRef} title={`Delivery Challans (${sortedChallans.length}${filterPartyId ? ` of ${data.deliveryChallans.length}` : ""})`}>
         {data.deliveryChallans.length === 0 ? (
           <Empty text="No deliveries recorded yet." />
         ) : (
@@ -2913,6 +2934,7 @@ function ReturnEntry({ data, persist, markTyping }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [sortBy, setSortBy] = useState("date"); // "date" | "updated"
   const [filterPartyId, setFilterPartyId] = useState("");
+  const [listRef, scrollToList] = useScrollToRef();
 
   const setLine = (idx, patch) => {
     const next = [...lines];
@@ -2992,6 +3014,7 @@ function ReturnEntry({ data, persist, markTyping }) {
     persist({ ...next, drafts: clearedDrafts() });
     setEditingId(null);
     resetFormLocal({ header: emptyHeader, lines: emptyLines, returnNoInput: String(next.seq.return) });
+    scrollToList();
   };
 
   const sortedChallans = useMemo(() => {
@@ -3090,7 +3113,7 @@ function ReturnEntry({ data, persist, markTyping }) {
         )}
       </Panel>
 
-      <Panel title={`Return Challans (${sortedChallans.length}${filterPartyId ? ` of ${data.returnChallans.length}` : ""})`}>
+      <Panel panelRef={listRef} title={`Return Challans (${sortedChallans.length}${filterPartyId ? ` of ${data.returnChallans.length}` : ""})`}>
         {data.returnChallans.length === 0 ? (
           <Empty text="No returns recorded yet." />
         ) : (
@@ -4384,6 +4407,7 @@ function PartyLedger({ data, persist, markTyping }) {
   const [partyId, setPartyId] = useState("");
   const [paymentForm, setPaymentForm, resetPaymentForm, resetPaymentFormLocal, clearedPaymentDrafts] = useDraftForm("paymentForm", emptyPaymentForm(), data, persist, markTyping);
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
+  const [paymentListRef, scrollToPaymentList] = useScrollToRef();
   const party = data.parties.find((p) => p.id === partyId);
 
   // reset the payment form whenever the selected party changes
@@ -4453,6 +4477,7 @@ function PartyLedger({ data, persist, markTyping }) {
     };
     persist({ ...next, drafts: clearedPaymentDrafts() });
     resetPaymentFormLocal(emptyPaymentForm());
+    scrollToPaymentList();
   };
 
   const deletePayment = (id) => {
@@ -4618,7 +4643,7 @@ function PartyLedger({ data, persist, markTyping }) {
             </button>
 
             {(data.payments || []).filter((p) => p.partyId === partyId).length > 0 && (
-              <div style={{ marginTop: 16 }}>
+              <div ref={paymentListRef} style={{ marginTop: 16 }}>
                 <Table
                   cols={["Date", "Amount (₹)", "Mode", "Note", ""]}
                   rows={[...(data.payments || [])]
@@ -4919,6 +4944,7 @@ function Expenses({ data, persist, markTyping }) {
   const [periodStart, setPeriodStart] = useState(initialPeriod.start);
   const [periodEnd, setPeriodEnd] = useState(initialPeriod.end);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [listRef, scrollToList] = useScrollToRef();
 
   const categories = data.expenseCategories && data.expenseCategories.length ? data.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
 
@@ -4941,6 +4967,7 @@ function Expenses({ data, persist, markTyping }) {
     };
     persist({ ...next, drafts: clearedDrafts() });
     resetFormLocal(emptyExpenseForm());
+    scrollToList();
   };
 
   const deleteExpense = (id) => {
@@ -5091,7 +5118,7 @@ function Expenses({ data, persist, markTyping }) {
         </div>
       </Panel>
 
-      <Panel title="All Expenses in Period">
+      <Panel panelRef={listRef} title="All Expenses in Period">
         {periodExpenses.length === 0 ? (
           <Empty text="No expenses recorded in this period." />
         ) : (
@@ -5344,9 +5371,9 @@ function PageHeader({ title, subtitle }) {
     </div>
   );
 }
-function Panel({ title, hint, children }) {
+function Panel({ title, hint, children, panelRef }) {
   return (
-    <div className="ui-panel" style={styles.panel}>
+    <div className="ui-panel" style={styles.panel} ref={panelRef}>
       <div style={styles.panelHeader}>
         <h2 style={styles.h2}>{title}</h2>
         {hint && <span style={styles.hint}>{hint}</span>}
@@ -5409,6 +5436,12 @@ function StatCard({ label, value }) {
 function Table({ cols, rows, serial = true }) {
   const allCols = serial ? ["#", ...cols] : cols;
   const allRows = serial ? rows.map((r, i) => [i + 1, ...r]) : rows;
+  // On mobile, each row renders as a stacked card instead of a scrolling table
+  // (see .ui-table rules inside the max-width:768px block in globalCss).
+  // data-rec marks which cell becomes the card title vs. the corner serial
+  // badge vs. an ordinary label/value line; data-label feeds the ::before
+  // label text for ordinary cells.
+  const titleIdx = serial ? 1 : 0;
   return (
     <div className="table-wrap" style={styles.tableWrap}>
       <table className="ui-table" style={styles.table}>
@@ -5418,7 +5451,16 @@ function Table({ cols, rows, serial = true }) {
         <tbody>
           {allRows.map((r, i) => (
             <tr key={i} className="ui-row" style={{ ...styles.tr, animationDelay: `${Math.min(i, 12) * 22}ms` }}>
-              {r.map((cell, j) => <td key={j} style={styles.td}>{cell}</td>)}
+              {r.map((cell, j) => (
+                <td
+                  key={j}
+                  style={styles.td}
+                  data-label={allCols[j]}
+                  data-rec={j === titleIdx ? "title" : (serial && j === 0) ? "serial" : "field"}
+                >
+                  {cell}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -5752,15 +5794,67 @@ const globalCss = `
     .main-content label { width: 100%; }
     .line-row, .form-row { flex-direction: column; align-items: stretch !important; }
 
-    /* --- Tables scroll horizontally with momentum --- */
+    /* --- Tables become stacked cards, no horizontal scroll --- */
     .table-wrap {
-      -webkit-overflow-scrolling: touch;
-      margin: 0 -16px;
-      padding: 0 16px;
+      margin: 0;
+      padding: 0;
       max-height: none !important;
+      overflow: visible !important;
     }
-    .ui-table th, .ui-table td { white-space: nowrap; }
+    .ui-table { display: block; width: 100%; }
+    .ui-table thead { display: none; }
+    .ui-table tbody { display: block; }
     .ui-table tbody tr:hover td { background: transparent; }
+    .ui-table tr {
+      display: block;
+      position: relative;
+      background: ${COLORS.panel};
+      border-radius: 12px !important;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+      padding: 14px 16px !important;
+      margin-bottom: 10px;
+    }
+    .ui-table td {
+      display: flex !important;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+      padding: 5px 0 !important;
+      border: none !important;
+      text-align: right;
+      white-space: normal !important;
+      font-size: 13px;
+    }
+    .ui-table td[data-label]::before {
+      content: attr(data-label);
+      font-size: 12px;
+      font-weight: 600;
+      color: ${COLORS.muted};
+      text-align: left;
+      flex-shrink: 0;
+    }
+    /* First real column becomes the card's title line */
+    .ui-table td[data-rec="title"] {
+      display: block !important;
+      font-size: 15px;
+      font-weight: 700;
+      color: ${COLORS.ink};
+      padding: 0 46px 8px 0 !important;
+      margin-bottom: 6px;
+      border-bottom: 1px solid rgba(0,0,0,0.06) !important;
+    }
+    .ui-table td[data-rec="title"]::before { display: none; }
+    /* Row serial number becomes a small badge in the card's corner */
+    .ui-table td[data-rec="serial"] {
+      position: absolute;
+      top: 12px; right: 14px;
+      display: block !important;
+      font-size: 11px;
+      color: ${COLORS.muted};
+      opacity: 0.55;
+      padding: 0 !important;
+    }
+    .ui-table td[data-rec="serial"]::before { display: none; }
 
     /* --- Bottom tab bar --- */
     .bottom-nav {
