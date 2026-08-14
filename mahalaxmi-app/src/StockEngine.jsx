@@ -5477,7 +5477,7 @@ function Table({ cols, rows, serial = true }) {
                   data-label={allCols[j]}
                   data-rec={j === titleIdx ? "title" : (serial && j === 0) ? "serial" : "field"}
                 >
-                  {cell}
+                  {j === titleIdx ? <span className="ui-row-title-text">{cell}</span> : cell}
                 </td>
               ))}
             </tr>
@@ -5871,6 +5871,13 @@ const globalCss = `
       padding: 0 46px 0 0 !important;
     }
     .ui-table td[data-rec="title"]::before { display: none; }
+    .ui-table td[data-rec="title"] .ui-row-title-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      flex: 1;
+    }
     .ui-table td[data-rec="title"]::after {
       content: "";
       width: 7px; height: 7px;
