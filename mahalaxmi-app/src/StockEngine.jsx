@@ -1630,7 +1630,7 @@ export default function StockEngine({ session, onLogout }) {
       </div>
 
       {/* Backdrop, only shown on mobile when the drawer is open */}
-      {navOpen && <div className="mobile-backdrop" onClick={confirmClick(() => setNavOpen(false), "Are you sure?")} />}
+      {navOpen && <div className="mobile-backdrop" onClick={() => setNavOpen(false)} />}
 
       <aside className={`sidebar${navOpen ? " sidebar-open" : ""}`} style={styles.sidebar}>
         <div style={styles.brand}>
@@ -1641,7 +1641,7 @@ export default function StockEngine({ session, onLogout }) {
           </div>
           <button
             className="mobile-close-btn"
-            onClick={confirmClick(() => setNavOpen(false), "Are you sure?")}
+            onClick={() => setNavOpen(false)}
             aria-label="Close menu"
           >
             <X size={18} strokeWidth={2} />
@@ -1654,10 +1654,10 @@ export default function StockEngine({ session, onLogout }) {
             return (
               <button
                 key={n.id}
-                onClick={confirmClick(() => {
+                onClick={() => {
                   setTab(n.id);
                   setNavOpen(false); // close drawer after picking a page on mobile
-                }, "Are you sure?")}
+                }}
                 style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}
               >
                 <Icon size={16} strokeWidth={2} />
