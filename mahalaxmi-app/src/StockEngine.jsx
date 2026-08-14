@@ -1402,7 +1402,8 @@ export default function StockEngine({ session, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
   const [tab, setTab] = useState("dashboard");
-  const [navOpen, setNavOpen] = useState(false); // mobile-only sidebar drawer
+  const [navOpen, setNavOpen] = useState(false); // legacy drawer (desktop-only fallback)
+  const [moreOpen, setMoreOpen] = useState(false); // mobile bottom-sheet for secondary sections
 
   // Injects the app's global stylesheet (incl. @media print rules) into
   // <head>. This MUST live in <head>, not nested inside .app-shell — print
@@ -1586,7 +1587,7 @@ export default function StockEngine({ session, onLogout }) {
       <div className="mobile-topbar">
         <button
           className="mobile-menu-btn"
-          onClick={() => setNavOpen(true)}
+          onClick={() => setMoreOpen(true)}
           aria-label="Open menu"
         >
           <Menu size={20} strokeWidth={2} />
@@ -1677,6 +1678,64 @@ export default function StockEngine({ session, onLogout }) {
           {tab === "recyclebin" && <RecycleBin data={data} persist={persist} />}
         </div>
       </main>
+
+      {/* ---- Mobile bottom tab bar (hidden on desktop via CSS) ---- */}
+      <nav className="bottom-nav">
+        {[
+          { id: "dashboard", label: "Stats", icon: LayoutGrid },
+          { id: "items", label: "Items", icon: Boxes },
+          { id: "parties", label: "Parties", icon: Users },
+          { id: "ledger", label: "Ledger", icon: History },
+        ].map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              className={tab === t.id ? "active" : ""}
+              onClick={() => { setTab(t.id); setMoreOpen(false); }}
+            >
+              <Icon size={19} strokeWidth={2} />
+              {t.label}
+            </button>
+          );
+        })}
+        <button
+          className={moreOpen ? "active" : ""}
+          onClick={() => setMoreOpen((v) => !v)}
+        >
+          <Menu size={19} strokeWidth={2} />
+          More
+        </button>
+      </nav>
+
+      {/* ---- "More" sheet: every remaining section ---- */}
+      {moreOpen && (
+        <>
+          <div className="more-sheet-backdrop" onClick={() => setMoreOpen(false)} />
+          <div className="more-sheet">
+            <div className="grabber" />
+            {nav
+              .filter((n) => !["dashboard", "items", "parties", "ledger"].includes(n.id))
+              .map((n) => {
+                const Icon = n.icon;
+                return (
+                  <button
+                    key={n.id}
+                    className={tab === n.id ? "active" : ""}
+                    onClick={() => { setTab(n.id); setMoreOpen(false); }}
+                  >
+                    <Icon size={17} strokeWidth={2} />
+                    {n.label}
+                  </button>
+                );
+              })}
+            <button onClick={onLogout}>
+              <LogOut size={17} strokeWidth={2} />
+              Log out
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1699,7 +1758,7 @@ function SaveStatus({ saveState, retrySave }) {
             style={{
               background: "transparent", border: "1px solid #e0745a", borderRadius: 4,
               color: "#e0745a", fontSize: 10.5, padding: "1px 6px", cursor: "pointer",
-              fontFamily: "system-ui, sans-serif",
+              fontFamily: "'Public Sans', system-ui, sans-serif",
             }}
           >
             Retry
@@ -3788,11 +3847,11 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
                     }}
                     onClick={() => setExpandedPartyId(isExpanded ? null : party.id)}
                   >
-                    <span style={{ fontWeight: 700, fontSize: 13.5, fontFamily: "system-ui, sans-serif", color: COLORS.ink }}>
+                    <span style={{ fontWeight: 700, fontSize: 13.5, fontFamily: "'Public Sans', system-ui, sans-serif", color: COLORS.ink }}>
                       {isExpanded ? "▾" : "▸"} {party.code} — {party.name}{" "}
                       {isEdited && <span style={{ ...styles.tinyTag, background: "#fff3cd", color: "#856404" }}>edited</span>}
                     </span>
-                    <span style={{ fontSize: 12.5, fontFamily: "system-ui, sans-serif", color: COLORS.muted }}>
+                    <span style={{ fontSize: 12.5, fontFamily: "'Public Sans', system-ui, sans-serif", color: COLORS.muted }}>
                       {resolved.lines.length} line{resolved.lines.length === 1 ? "" : "s"} · Item Rent ₹{resolved.itemRentTotal.toFixed(2)} · <strong style={{ color: COLORS.ink }}>Total ₹{resolved.finalTotal.toFixed(2)}</strong>
                     </span>
                   </div>
@@ -3987,7 +4046,7 @@ function InvoiceArchive({ data, persist }) {
     <strong>{Number((inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal) || 0).toFixed(2)}</strong>,
     confirmVoidId === inv.id ? (
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Void this invoice?</span>
+        <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Void this invoice?</span>
         <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => voidInvoice(inv.id)} title="Confirm void"><CheckCircle2 size={14} /></button>
         <button style={styles.iconBtn} onClick={() => setConfirmVoidId(null)} title="Cancel"><X size={14} /></button>
       </div>
@@ -4036,7 +4095,7 @@ function InvoiceArchive({ data, persist }) {
                         display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%",
                         background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8,
                         padding: "9px 14px", marginBottom: collapsed ? 0 : 8, cursor: "pointer",
-                        fontFamily: "system-ui, sans-serif",
+                        fontFamily: "'Public Sans', system-ui, sans-serif",
                       }}
                     >
                       <span style={{ fontWeight: 700, fontSize: 13.5, color: COLORS.ink }}>
@@ -4088,7 +4147,7 @@ function InvoicePartyHeader({ data, invoice }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
       {/* LEFT — party details */}
-      <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, invoice.partyId)}</div>
         {party?.address && <div><strong>Address:</strong> {party.address}</div>}
         {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
@@ -4101,7 +4160,7 @@ function InvoicePartyHeader({ data, invoice }) {
         )}
       </div>
       {/* RIGHT — invoice no & date */}
-      <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
         <div><strong>Invoice No.:</strong> {invoice.invoiceNo}</div>
         <div><strong>Invoice Date:</strong> {fmtDateDisplay(invoice.invoiceDate)}</div>
         <div><strong>Billing Period:</strong> {fmtDateDisplay(invoice.billStart)} → {fmtDateDisplay(invoice.billEnd)}</div>
@@ -4175,12 +4234,12 @@ function AccountSummarySheet({ data, invoice, accountSummary }) {
     <div className="invoice-sheet" style={styles.invoiceSheet}>
       <InvoiceLetterhead data={data} invoice={invoice} />
       <InvoicePartyHeader data={data} invoice={invoice} />
-      <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
         Pending Items &amp; Balance
       </div>
       {accountSummary.pendingItems.length > 0 ? (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 11.5, fontWeight: 600, color: COLORS.muted, marginBottom: 4 }}>
+          <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 11.5, fontWeight: 600, color: COLORS.muted, marginBottom: 4 }}>
             Items Currently With Party (Not Yet Returned)
           </div>
           <Table
@@ -4189,7 +4248,7 @@ function AccountSummarySheet({ data, invoice, accountSummary }) {
           />
         </div>
       ) : (
-        <div style={{ fontFamily: "system-ui, sans-serif", fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12, color: COLORS.muted, marginBottom: 14 }}>
           No items currently pending return with this party.
         </div>
       )}
@@ -5091,13 +5150,13 @@ function RecycleBin({ data, persist }) {
               </span>,
               confirmRestoreId === e.binId ? (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Restore this item?</span>
+                  <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Restore this item?</span>
                   <button style={{ ...styles.iconBtn, color: "#2e7d32", borderColor: "#2e7d32" }} onClick={() => restore(e.binId)} title="Confirm restore"><CheckCircle2 size={14} /></button>
                   <button style={styles.iconBtn} onClick={() => setConfirmRestoreId(null)} title="Cancel"><X size={14} /></button>
                 </div>
               ) : confirmPurgeId === e.binId ? (
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>Delete forever?</span>
+                  <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Delete forever?</span>
                   <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => purge(e.binId)} title="Confirm"><CheckCircle2 size={14} /></button>
                   <button style={styles.iconBtn} onClick={() => setConfirmPurgeId(null)} title="Cancel"><X size={14} /></button>
                 </div>
@@ -5193,7 +5252,7 @@ function BackupRestore({ data, persist }) {
         </p>
         {confirmSeed ? (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ fontSize: 12.5, color: COLORS.danger, fontFamily: "system-ui, sans-serif" }}>Replace all current data with the Excel import?</span>
+            <span style={{ fontSize: 12.5, color: COLORS.danger, fontFamily: "'Public Sans', system-ui, sans-serif" }}>Replace all current data with the Excel import?</span>
             <button style={{ ...styles.primaryBtn, background: COLORS.danger }} onClick={reloadSeed}><CheckCircle2 size={14} /> Yes, reload it</button>
             <button style={styles.ghostBtn} onClick={() => setConfirmSeed(false)}><X size={13} /> Cancel</button>
           </div>
@@ -5289,7 +5348,7 @@ function ConfirmDelete({ id, confirmId, setConfirmId, onConfirm, label = "Delete
   if (confirmId === id) {
     return (
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" }}>{label}</span>
+        <span style={{ fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" }}>{label}</span>
         <button style={{ ...styles.iconBtn, color: "#b3261e", borderColor: "#b3261e" }} onClick={() => onConfirm(id)} title="Confirm"><CheckCircle2 size={14} /></button>
         <button style={styles.iconBtn} onClick={() => setConfirmId(null)} title="Cancel"><X size={14} /></button>
       </div>
@@ -5387,19 +5446,21 @@ function SelectField({ label, value, onChange, options }) {
 /* ---------------- styles ---------------- */
 
 const COLORS = {
-  bg: "#faf7f1",
+  bg: "#f9f8f6",        // paper
   panel: "#ffffff",
-  ink: "#241c14",
-  muted: "#8a7d6b",
-  border: "#e7ddcd",
-  amber: "#b5651d",
-  amberDeep: "#8a4413",
+  ink: "#1c1917",
+  muted: "#78716c",
+  border: "#e7e5e4",
+  amber: "#92400e",     // accent
+  amberDeep: "#7c3208",
   danger: "#b3261e",
-  sidebar: "#241c14",
-  sidebarInk: "#efe6d8",
+  sidebar: "#1c1917",
+  sidebarInk: "#f2f0eb",
+  surface: "#f2f0eb",
 };
 
 const globalCss = `
+  @import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap');
   :root { --amber: ${COLORS.amber}; --ink: ${COLORS.ink}; --muted: ${COLORS.muted}; --danger: ${COLORS.danger}; }
   * { box-sizing: border-box; }
   input, select { font-family: inherit; }
@@ -5614,18 +5675,154 @@ const globalCss = `
     }
     .party-filter-wrap select { width: 100%; }
   }
+  /* ================= MOBILE UI — "Warm Shop Ledger" ================= */
+  .bottom-nav { display: none; }
+  .more-sheet, .more-sheet-backdrop { display: none; }
+  .mobile-only { display: none !important; }
+
+  @media (max-width: 768px) {
+    html, body { -webkit-text-size-adjust: 100%; }
+    .app-shell { background: ${COLORS.bg}; }
+    .mobile-only { display: block !important; }
+
+    /* --- Top bar: paper, not dark --- */
+    .mobile-topbar {
+      background: ${COLORS.bg} !important;
+      border-bottom: 1px solid rgba(28,25,23,0.06);
+      padding: 10px 16px !important;
+      backdrop-filter: saturate(180%) blur(8px);
+    }
+    .mobile-topbar > div { color: ${COLORS.ink} !important; }
+    .mobile-menu-btn { color: ${COLORS.ink} !important; }
+
+    /* --- Content spacing so the bottom bar never covers anything --- */
+    .main-content-inner { padding: 16px 16px 132px !important; }
+    .main-content { background: ${COLORS.bg} !important; }
+    .mainTopBar, .main-content > div:first-child { padding: 8px 16px !important; }
+
+    /* --- Panels become soft ledger cards --- */
+    .ui-panel {
+      border-radius: 12px !important;
+      border: none !important;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+      padding: 16px !important;
+      margin-bottom: 12px !important;
+    }
+    .ui-panel:hover { box-shadow: 0 0 0 1px rgba(0,0,0,0.05); }
+
+    /* --- Stat cards: 2-up grid, surface tone --- */
+    .ui-stat {
+      background: ${COLORS.surface} !important;
+      border: none !important;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+      border-radius: 12px !important;
+      padding: 14px !important;
+    }
+    .ui-stat:hover { transform: none; box-shadow: 0 0 0 1px rgba(0,0,0,0.05); }
+
+    /* --- Tap-friendly controls --- */
+    .main-content input,
+    .main-content select,
+    .main-content textarea {
+      font-size: 16px !important;      /* stops iOS zoom-on-focus */
+      padding: 11px 12px !important;
+      border-radius: 8px !important;
+      background: ${COLORS.surface} !important;
+      border: 1px solid rgba(0,0,0,0.06) !important;
+      width: 100%;
+    }
+    .main-content button { min-height: 42px; border-radius: 8px !important; }
+    .main-content button:hover { transform: none; }
+
+    /* --- Forms stack cleanly --- */
+    .main-content label { width: 100%; }
+    .line-row, .form-row { flex-direction: column; align-items: stretch !important; }
+
+    /* --- Tables scroll horizontally with momentum --- */
+    .table-wrap {
+      -webkit-overflow-scrolling: touch;
+      margin: 0 -16px;
+      padding: 0 16px;
+      max-height: none !important;
+    }
+    .ui-table th, .ui-table td { white-space: nowrap; }
+    .ui-table tbody tr:hover td { background: transparent; }
+
+    /* --- Bottom tab bar --- */
+    .bottom-nav {
+      display: flex;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: calc(62px + env(safe-area-inset-bottom));
+      padding-bottom: env(safe-area-inset-bottom);
+      background: #ffffff;
+      border-top: 1px solid rgba(28,25,23,0.06);
+      align-items: center;
+      justify-content: space-around;
+      z-index: 45;
+    }
+    .bottom-nav button {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      background: transparent; border: none; cursor: pointer;
+      color: ${COLORS.ink}; opacity: 0.42;
+      font-family: 'Public Sans', system-ui, sans-serif;
+      font-size: 10px; font-weight: 500; padding: 6px 10px;
+      min-width: 56px;
+    }
+    .bottom-nav button.active { opacity: 1; color: ${COLORS.amber}; }
+
+    /* --- "More" sheet --- */
+    .more-sheet-backdrop {
+      display: block; position: fixed; inset: 0;
+      background: rgba(28,25,23,0.35); z-index: 46;
+    }
+    .more-sheet {
+      display: block;
+      position: fixed; left: 0; right: 0; bottom: 0;
+      z-index: 47;
+      background: ${COLORS.bg};
+      border-radius: 16px 16px 0 0;
+      padding: 8px 0 calc(16px + env(safe-area-inset-bottom));
+      max-height: 78vh; overflow-y: auto;
+      box-shadow: 0 -8px 32px rgba(0,0,0,0.18);
+      animation: sheet-up 0.28s cubic-bezier(0.22,1,0.36,1) both;
+    }
+    .more-sheet .grabber {
+      width: 38px; height: 4px; border-radius: 999px;
+      background: rgba(28,25,23,0.18); margin: 6px auto 10px;
+    }
+    .more-sheet button {
+      display: flex; align-items: center; gap: 12px;
+      width: 100%; background: transparent; border: none;
+      padding: 14px 20px; font-size: 15px; text-align: left;
+      color: ${COLORS.ink}; font-family: 'Public Sans', system-ui, sans-serif;
+      border-bottom: 1px solid rgba(28,25,23,0.05); cursor: pointer;
+    }
+    .more-sheet button.active { color: ${COLORS.amber}; font-weight: 600; }
+
+    /* Old drawer is retired on mobile — the tab bar + sheet replace it */
+    .sidebar { display: none !important; }
+    .mobile-backdrop { display: none !important; }
+  }
+
+  @keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+
+  @media print {
+    .bottom-nav, .more-sheet, .more-sheet-backdrop { display: none !important; }
+  }
+
 `;
 
 const styles = {
   app: {
     display: "flex",
     height: "100vh",
-    fontFamily: "'Georgia', 'Iowan Old Style', serif",
+    fontFamily: "'Public Sans', system-ui, -apple-system, sans-serif",
     background: COLORS.bg,
     color: COLORS.ink,
   },
   loadingWrap: { display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400, background: COLORS.bg },
-  loadingCard: { fontFamily: "Georgia, serif", color: COLORS.muted },
+  loadingCard: { fontFamily: "'Public Sans', system-ui, sans-serif", color: COLORS.muted },
   sidebar: {
     width: 220,
     background: COLORS.sidebar,
@@ -5640,7 +5837,7 @@ const styles = {
   brandMark: {
     width: 32, height: 32, borderRadius: 6, background: COLORS.amber, color: "#fff",
     display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 16,
-    fontFamily: "Georgia, serif",
+    fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   brandName: { fontSize: 14.5, fontWeight: 700, letterSpacing: 0.2 },
   brandSub: { fontSize: 11, color: "#a89a83", letterSpacing: 0.5, textTransform: "uppercase" },
@@ -5648,11 +5845,11 @@ const styles = {
   navBtn: {
     display: "flex", alignItems: "center", gap: 10, textAlign: "left",
     padding: "9px 10px", borderRadius: 6, border: "none", background: "transparent",
-    color: "#cfc3ac", fontSize: 13.5, cursor: "pointer", fontFamily: "system-ui, sans-serif",
+    color: "#cfc3ac", fontSize: 13.5, cursor: "pointer", fontFamily: "'Public Sans', system-ui, sans-serif",
     transition: "background 0.15s",
   },
   navBtnActive: { background: "rgba(181,101,29,0.25)", color: "#fff" },
-  saveIndicator: { height: 20, fontSize: 11.5, fontFamily: "system-ui, sans-serif" },
+  saveIndicator: { height: 20, fontSize: 11.5, fontFamily: "'Public Sans', system-ui, sans-serif" },
   saveDim: { color: COLORS.muted },
   saveOk: { color: "#3a7d3a", display: "flex", alignItems: "center", gap: 4 },
   main: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", minHeight: 0 },
@@ -5664,9 +5861,9 @@ const styles = {
   mainInner: { padding: "28px 34px 60px" },
   pageHeader: { marginBottom: 22, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 14 },
   h1: { fontSize: 22, margin: 0, fontWeight: 700 },
-  subtitle: { fontSize: 13, color: COLORS.muted, margin: "6px 0 0", fontFamily: "system-ui, sans-serif" },
+  subtitle: { fontSize: 13, color: COLORS.muted, margin: "6px 0 0", fontFamily: "'Public Sans', system-ui, sans-serif" },
   h2: { fontSize: 14.5, margin: 0, fontWeight: 700 },
-  hint: { fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif" },
+  hint: { fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" },
   panel: {
     background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10,
     padding: 18, marginBottom: 18,
@@ -5675,38 +5872,38 @@ const styles = {
   statRow: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 },
   statCard: { background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "14px 16px" },
   statValue: { fontSize: 24, fontWeight: 700, color: COLORS.amber },
-  statLabel: { fontSize: 11.5, color: COLORS.muted, fontFamily: "system-ui, sans-serif", marginTop: 2 },
+  statLabel: { fontSize: 11.5, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif", marginTop: 2 },
   grid2: {}, // layout handled by .grid2 CSS class (see globalCss)
   formRow: { display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" },
   field: { display: "flex", flexDirection: "column", gap: 4, minWidth: 120 },
-  fieldLabel: { fontSize: 11, color: COLORS.muted, fontFamily: "system-ui, sans-serif" },
+  fieldLabel: { fontSize: 11, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif" },
   input: {
     padding: "8px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}`,
-    fontSize: 13.5, background: "#fffdf9", color: COLORS.ink, fontFamily: "system-ui, sans-serif",
+    fontSize: 13.5, background: "#fffdf9", color: COLORS.ink, fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   select: {
     padding: "8px 10px", borderRadius: 6, border: `1px solid ${COLORS.border}`,
-    fontSize: 13.5, background: "#fffdf9", color: COLORS.ink, fontFamily: "system-ui, sans-serif",
+    fontSize: 13.5, background: "#fffdf9", color: COLORS.ink, fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   primaryBtn: {
     display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 16px",
     background: COLORS.amber, color: "#fff", border: "none", borderRadius: 7,
-    fontSize: 13.5, fontWeight: 600, cursor: "pointer", fontFamily: "system-ui, sans-serif",
+    fontSize: 13.5, fontWeight: 600, cursor: "pointer", fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   ghostBtn: {
     display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px",
     background: "transparent", color: COLORS.amberDeep, border: `1px dashed ${COLORS.amber}`,
-    borderRadius: 6, fontSize: 12.5, cursor: "pointer", fontFamily: "system-ui, sans-serif", marginTop: 4,
+    borderRadius: 6, fontSize: 12.5, cursor: "pointer", fontFamily: "'Public Sans', system-ui, sans-serif", marginTop: 4,
   },
   iconBtn: {
     display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30,
     background: "transparent", border: `1px solid ${COLORS.border}`, borderRadius: 6,
     color: COLORS.muted, cursor: "pointer",
   },
-  lineHeaderRow: { display: "flex", gap: 8, fontSize: 11, color: COLORS.muted, fontFamily: "system-ui, sans-serif", padding: "0 2px 4px", marginTop: 6 },
+  lineHeaderRow: { display: "flex", gap: 8, fontSize: 11, color: COLORS.muted, fontFamily: "'Public Sans', system-ui, sans-serif", padding: "0 2px 4px", marginTop: 6 },
   lineRow: { display: "flex", gap: 8, alignItems: "center", marginBottom: 6, flexWrap: "wrap" },
   tableWrap: { overflowX: "auto", overflowY: "auto", maxHeight: 460, borderRadius: 6 },
-  table: { width: "100%", borderCollapse: "collapse", fontFamily: "system-ui, sans-serif" },
+  table: { width: "100%", borderCollapse: "collapse", fontFamily: "'Public Sans', system-ui, sans-serif" },
   th: {
     textAlign: "left", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4,
     color: COLORS.muted, padding: "6px 10px", borderBottom: `1px solid ${COLORS.border}`,
@@ -5719,17 +5916,17 @@ const styles = {
     fontFamily: "'SFMono-Regular', Consolas, monospace", fontSize: 11.5, background: "#f2e9d8",
     color: COLORS.amberDeep, padding: "2px 6px", borderRadius: 4,
   },
-  empty: { color: COLORS.muted, fontSize: 13, fontFamily: "system-ui, sans-serif", padding: "10px 0" },
-  plainText: { fontSize: 13, color: COLORS.ink, fontFamily: "system-ui, sans-serif", marginBottom: 12, lineHeight: 1.5 },
+  empty: { color: COLORS.muted, fontSize: 13, fontFamily: "'Public Sans', system-ui, sans-serif", padding: "10px 0" },
+  plainText: { fontSize: 13, color: COLORS.ink, fontFamily: "'Public Sans', system-ui, sans-serif", marginBottom: 12, lineHeight: 1.5 },
   okNotice: {
     display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "#2e7d32",
     background: "#eaf5ea", border: "1px solid #cbe6cc", borderRadius: 6, padding: "8px 10px",
-    marginBottom: 10, fontFamily: "system-ui, sans-serif",
+    marginBottom: 10, fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   notice: {
     display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: COLORS.danger,
     background: "#fbeceb", border: "1px solid #f0cfcc", borderRadius: 6, padding: "8px 10px",
-    marginBottom: 10, fontFamily: "system-ui, sans-serif",
+    marginBottom: 10, fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   tinyTag: {
     fontSize: 10, fontStyle: "normal", color: COLORS.amberDeep, background: "#f2e9d8",
@@ -5741,7 +5938,7 @@ const styles = {
   },
   totalRow: {
     display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 2px",
-    fontFamily: "system-ui, sans-serif",
+    fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   totalRowBig: {
     fontSize: 16, borderTop: `1px solid ${COLORS.border}`, marginTop: 4, paddingTop: 8, color: COLORS.amberDeep,
@@ -5751,9 +5948,9 @@ const styles = {
   },
   invoiceLetterhead: { textAlign: "center", marginBottom: 22, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 14 },
   invoiceCompany: { fontSize: 17, fontWeight: 700, letterSpacing: 0.3 },
-  invoiceTagline: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "system-ui, sans-serif" },
-  invoiceAddress: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "system-ui, sans-serif" },
+  invoiceTagline: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "'Public Sans', system-ui, sans-serif" },
+  invoiceAddress: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "'Public Sans', system-ui, sans-serif" },
   invoiceMetaRow: {
-    display: "flex", gap: 20, fontSize: 12.5, marginBottom: 6, fontFamily: "system-ui, sans-serif", flexWrap: "wrap",
+    display: "flex", gap: 20, fontSize: 12.5, marginBottom: 6, fontFamily: "'Public Sans', system-ui, sans-serif", flexWrap: "wrap",
   },
 };
