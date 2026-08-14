@@ -5825,7 +5825,8 @@ const globalCss = `
     .ui-table tbody { display: block; }
     .ui-table tbody tr:hover td { background: transparent; }
     .ui-table tr {
-      display: block;
+      display: flex;
+      flex-direction: column;
       position: relative;
       background: ${COLORS.panel};
       border-radius: 12px !important;
@@ -5869,6 +5870,7 @@ const globalCss = `
       display: flex !important;
       justify-content: space-between;
       align-items: center;
+      order: -1;
       font-size: 15px;
       font-weight: 700;
       color: ${COLORS.ink};
