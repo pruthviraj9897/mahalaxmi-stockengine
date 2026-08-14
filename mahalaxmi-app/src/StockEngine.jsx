@@ -1623,7 +1623,7 @@ export default function StockEngine({ session, onLogout }) {
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={styles.brandMark}>M</div>
-          <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: 0.2, color: COLORS.sidebarInk }}>
+          <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: 0.2, color: COLORS.ink }}>
             Mahalaxmi
           </div>
         </div>
@@ -1721,7 +1721,7 @@ export default function StockEngine({ session, onLogout }) {
             <button
               key={t.id}
               className={tab === t.id ? "active" : ""}
-              onClick={confirmClick(() => { setTab(t.id); setMoreOpen(false); }, "Are you sure?")}
+              onClick={() => { setTab(t.id); setMoreOpen(false); }}
             >
               <Icon size={19} strokeWidth={2} />
               {t.label}
@@ -1730,7 +1730,7 @@ export default function StockEngine({ session, onLogout }) {
         })}
         <button
           className={moreOpen ? "active" : ""}
-          onClick={confirmClick(() => setMoreOpen((v) => !v), "Are you sure?")}
+          onClick={() => setMoreOpen((v) => !v)}
         >
           <Menu size={19} strokeWidth={2} />
           More
@@ -1740,7 +1740,7 @@ export default function StockEngine({ session, onLogout }) {
       {/* ---- "More" sheet: every remaining section ---- */}
       {moreOpen && (
         <>
-          <div className="more-sheet-backdrop" onClick={confirmClick(() => setMoreOpen(false), "Are you sure?")} />
+          <div className="more-sheet-backdrop" onClick={() => setMoreOpen(false)} />
           <div className="more-sheet">
             <div className="grabber" />
             {nav
@@ -1751,7 +1751,7 @@ export default function StockEngine({ session, onLogout }) {
                   <button
                     key={n.id}
                     className={tab === n.id ? "active" : ""}
-                    onClick={confirmClick(() => { setTab(n.id); setMoreOpen(false); }, "Are you sure?")}
+                    onClick={() => { setTab(n.id); setMoreOpen(false); }}
                   >
                     <Icon size={17} strokeWidth={2} />
                     {n.label}
