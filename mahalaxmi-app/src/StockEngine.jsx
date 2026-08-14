@@ -1682,10 +1682,10 @@ export default function StockEngine({ session, onLogout }) {
       {/* ---- Mobile bottom tab bar (hidden on desktop via CSS) ---- */}
       <nav className="bottom-nav">
         {[
-          { id: "dashboard", label: "Stats", icon: LayoutGrid },
-          { id: "items", label: "Items", icon: Boxes },
-          { id: "parties", label: "Parties", icon: Users },
-          { id: "ledger", label: "Ledger", icon: History },
+          { id: "delivery", label: "Delivery", icon: Truck },
+          { id: "return", label: "Return", icon: RotateCcw },
+          { id: "invoice", label: "Invoice", icon: FileText },
+          { id: "bulkInvoice", label: "Bulk Inv.", icon: Users },
         ].map((t) => {
           const Icon = t.icon;
           return (
@@ -1715,7 +1715,7 @@ export default function StockEngine({ session, onLogout }) {
           <div className="more-sheet">
             <div className="grabber" />
             {nav
-              .filter((n) => !["dashboard", "items", "parties", "ledger"].includes(n.id))
+              .filter((n) => !["delivery", "return", "invoice", "bulkInvoice"].includes(n.id))
               .map((n) => {
                 const Icon = n.icon;
                 return (
