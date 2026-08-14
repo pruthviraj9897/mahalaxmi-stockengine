@@ -2550,6 +2550,7 @@ function PartyMaster({ data, persist, markTyping }) {
         ) : (
           <Table
             cols={["Code", "Name", "Site", "Phone", "References", "GST", ""]}
+            titleCol={1}
             rows={data.parties.map((p) => [
               <span style={styles.codeTag}>{p.code}</span>,
               p.name,
@@ -2653,6 +2654,7 @@ function ItemMaster({ data, persist, markTyping }) {
         ) : (
           <Table
             cols={["Code", "Name", "Unit", "Daily Rate", "Service Charge", "Depot Stock", ""]}
+            titleCol={1}
             rows={data.items.map((it) => {
               const feet = parseFeet(it.name);
               return [
@@ -3824,6 +3826,7 @@ function BulkInvoiceBuilder({ data, persist, markTyping }) {
             <div className="table-wrap">
               <Table
                 cols={["", "Party", "Lines", "Item Rent", "Net / Grand Total"]}
+                titleCol={1}
                 rows={billable.map(({ party, result }) => {
                   const gst = computeGst(party, result.itemRentTotal + result.additionalCharges);
                   const finalTotal = round2(gst.grandTotal - result.depositTotal);
@@ -5433,7 +5436,7 @@ function StatCard({ label, value }) {
     </div>
   );
 }
-function Table({ cols, rows, serial = true }) {
+function Table({ cols, rows, serial = true, titleCol = 0 }) {
   const allCols = serial ? ["#", ...cols] : cols;
   const allRows = serial ? rows.map((r, i) => [i + 1, ...r]) : rows;
   // On mobile, each row renders as a stacked card instead of a scrolling table
@@ -5443,7 +5446,11 @@ function Table({ cols, rows, serial = true }) {
   // label text for ordinary cells. On mobile, cards start collapsed to just
   // the title line — tapping a row (outside its action buttons) toggles it
   // open to reveal the rest of the fields via the .ui-row-expanded class.
-  const titleIdx = serial ? 1 : 0;
+  // titleCol picks which column (by index into `cols`, i.e. not counting the
+  // serial number) becomes that title — defaults to the first column, but
+  // callers whose first column is a code/checkbox/etc. should override it to
+  // point at the column people actually want to see at a glance (e.g. Name).
+  const titleIdx = (serial ? 1 : 0) + titleCol;
   const [expanded, setExpanded] = useState(() => new Set());
   const toggleRow = (i, e) => {
     // Don't hijack taps on buttons/inputs/links inside the row (edit, delete,
