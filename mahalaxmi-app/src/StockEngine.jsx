@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Package, Truck, RotateCcw, Users, Boxes, LayoutGrid, Plus, Trash2, AlertCircle, CheckCircle2, FileText, Archive, Printer, Download, Upload, History, Pencil, X, Ban, Settings, LogOut, Menu, Wallet, Receipt } from "lucide-react";
+import { Package, Truck, RotateCcw, Users, Boxes, LayoutGrid, Plus, Trash2, AlertCircle, CheckCircle2, FileText, Archive, Printer, Download, Upload, History, Pencil, X, Ban, Settings, LogOut, Menu, Wallet, Receipt, IndianRupee } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STORAGE_KEY = "mlx-stockengine-v1";
@@ -1653,6 +1653,7 @@ export default function StockEngine({ session, onLogout }) {
     { id: "bulkInvoice", label: "Bulk Invoice", icon: Users },
     { id: "archive", label: "Invoice Archive", icon: Archive },
     { id: "ledger", label: "Party Ledger", icon: History },
+    { id: "receivePayment", label: "Receive Payment", icon: IndianRupee },
     { id: "balances", label: "Party Balances", icon: Receipt },
     { id: "expenses", label: "Expenses", icon: Wallet },
     { id: "recyclebin", label: "Recycle Bin", icon: Trash2 },
@@ -1752,6 +1753,7 @@ export default function StockEngine({ session, onLogout }) {
           {tab === "bulkInvoice" && <BulkInvoiceBuilder data={data} persist={persist} markTyping={markTyping} />}
           {tab === "archive" && <InvoiceArchive data={data} persist={persist} />}
           {tab === "ledger" && <PartyLedger data={data} persist={persist} markTyping={markTyping} />}
+          {tab === "receivePayment" && <ReceivePayment data={data} persist={persist} markTyping={markTyping} />}
           {tab === "balances" && <PartyBalances data={data} />}
           {tab === "expenses" && <Expenses data={data} persist={persist} markTyping={markTyping} />}
           {tab === "recyclebin" && <RecycleBin data={data} persist={persist} />}
@@ -5132,6 +5134,120 @@ function TotalRow({ label, value, bold, big }) {
     <div style={{ ...styles.totalRow, ...(big ? styles.totalRowBig : {}) }}>
       <span style={{ fontWeight: bold || big ? 700 : 400 }}>{label}</span>
       <span style={{ fontWeight: bold || big ? 700 : 400 }}>₹ {Number(value).toFixed(2)}</span>
+    </div>
+  );
+}
+
+/* ---------------- Receive Payment (standalone) ---------------- */
+
+// A dedicated payment-entry page, independent of Party Ledger — pick any
+// party, record a payment against them, and see every payment ever
+// recorded (across all parties) in one running list. Uses the same
+// `payments` data and add/delete logic as the Party Ledger panel, so a
+// payment recorded here shows up there too, and vice versa.
+function ReceivePayment({ data, persist, markTyping }) {
+  const [partyId, setPartyId] = useState("");
+  const [filterPartyId, setFilterPartyId] = useState("");
+  const [paymentForm, setPaymentForm, resetPaymentForm, resetPaymentFormLocal, clearedPaymentDrafts] = useDraftForm("receivePaymentForm", emptyPaymentForm(), data, persist, markTyping);
+  const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState(null);
+
+  const canSavePayment = partyId && Number(paymentForm.amount) > 0;
+
+  const addPayment = () => {
+    if (!canSavePayment) return;
+    const next = {
+      ...data,
+      payments: [
+        ...(data.payments || []),
+        {
+          id: crypto.randomUUID(),
+          partyId,
+          date: paymentForm.date,
+          amount: Number(paymentForm.amount),
+          mode: paymentForm.mode,
+          note: paymentForm.note || "",
+        },
+      ],
+    };
+    persist({ ...next, drafts: clearedPaymentDrafts() });
+    resetPaymentFormLocal(emptyPaymentForm());
+  };
+
+  const deletePayment = (id) => {
+    const payment = (data.payments || []).find((p) => p.id === id);
+    if (!payment) return;
+    moveToBin(data, persist, "payment", payment, `₹${payment.amount} — ${partyName(data, payment.partyId)} (${payment.mode})`);
+    setConfirmDeletePaymentId(null);
+  };
+
+  const visiblePayments = useMemo(() => {
+    return [...(data.payments || [])]
+      .filter((p) => !filterPartyId || p.partyId === filterPartyId)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [data.payments, filterPartyId]);
+
+  const visibleTotal = round2(visiblePayments.reduce((s, p) => s + (Number(p.amount) || 0), 0));
+
+  const partyOptions = data.parties.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }));
+
+  return (
+    <div>
+      <PageHeader title="Receive Payment" subtitle="Record a payment from any party — no need to open their Party Ledger first." />
+
+      <Panel title="Record a Payment" hint="Simple record-keeping — no receipts or gateway integration">
+        <div className="form-row" style={styles.formRow}>
+          <SelectField label="Party" value={partyId} onChange={setPartyId} options={partyOptions} />
+          <Field label="Date" type="date" value={paymentForm.date} onChange={(v) => setPaymentForm({ ...paymentForm, date: v })} />
+          <Field label="Amount (₹)" type="number" value={paymentForm.amount} placeholder="0" onChange={(v) => setPaymentForm({ ...paymentForm, amount: v })} />
+          <SelectField
+            label="Mode"
+            value={paymentForm.mode}
+            onChange={(v) => setPaymentForm({ ...paymentForm, mode: v })}
+            options={["Cash", "Bank Transfer", "UPI", "Cheque"].map((m) => ({ value: m, label: m }))}
+          />
+          <Field label="Note" value={paymentForm.note} placeholder="e.g. cheque no." onChange={(v) => setPaymentForm({ ...paymentForm, note: v })} wide />
+        </div>
+        <button style={{ ...styles.primaryBtn, opacity: canSavePayment ? 1 : 0.5 }} disabled={!canSavePayment} onClick={confirmClick(addPayment, "Add this payment?")}>
+          <CheckCircle2 size={15} /> Save Payment
+        </button>
+      </Panel>
+
+      <Panel title={`All Payments (${visiblePayments.length})`} hint="Every payment recorded, newest first — filter to one party if needed">
+        <div className="form-row" style={styles.formRow}>
+          <SelectField
+            label="Filter by Party"
+            value={filterPartyId}
+            onChange={setFilterPartyId}
+            options={[{ value: "", label: "All Parties" }, ...partyOptions]}
+          />
+        </div>
+
+        {visiblePayments.length === 0 ? (
+          <Empty text="No payments recorded yet." />
+        ) : (
+          <Table
+            cols={["Date", "Party", "Amount (₹)", "Mode", "Note", ""]}
+            rows={[
+              ...visiblePayments.map((p) => [
+                fmtDateDisplay(p.date),
+                partyName(data, p.partyId),
+                p.amount.toFixed(2),
+                p.mode,
+                p.note || "—",
+                <ConfirmDelete
+                  id={p.id}
+                  confirmId={confirmDeletePaymentId}
+                  setConfirmId={setConfirmDeletePaymentId}
+                  onConfirm={deletePayment}
+                  label="Move to bin?"
+                  title="Delete payment"
+                />,
+              ]),
+              [<strong>Total</strong>, "", <strong>{visibleTotal.toFixed(2)}</strong>, "", "", ""],
+            ]}
+          />
+        )}
+      </Panel>
     </div>
   );
 }
