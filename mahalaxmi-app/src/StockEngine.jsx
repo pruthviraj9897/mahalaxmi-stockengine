@@ -154,6 +154,36 @@ async function renderNodeToPdf(node) {
     el.style.overflowY = "visible";
   });
 
+  // html2canvas snapshots the DOM in whatever animation state it happens to
+  // be in — it doesn't respect @media print, so the on-screen fade-in/rise
+  // animations (.ui-row, .ui-panel, .ui-stat, .ui-pagehead) can get captured
+  // mid-transition. Rows further down a table have a longer animation-delay,
+  // so they're still faded (partial opacity) by the time we capture — that's
+  // the "PDF looks duller lower down the page" effect. Force every animated
+  // element to its finished resting state before capturing, then restore.
+  const animatedEls = node.querySelectorAll(".ui-row, .ui-panel, .ui-stat, .ui-pagehead");
+  const prevAnimStyles = Array.from(animatedEls).map((el) => ({
+    el, animation: el.style.animation, opacity: el.style.opacity, transform: el.style.transform,
+  }));
+  animatedEls.forEach((el) => {
+    el.style.animation = "none";
+    el.style.opacity = "1";
+    el.style.transform = "none";
+  });
+
+  // html2canvas also has a known issue with `position: sticky` (used on our
+  // table header cells for on-screen scrolling): the cloned layout it
+  // captures can reserve extra blank height below the real content, which
+  // then shows up as trailing blank pages once we paginate the canvas. A
+  // static export never scrolls, so headers don't need to stick — drop them
+  // to normal flow just for the capture.
+  const stickyEls = node.querySelectorAll("th");
+  const prevStickyStyles = Array.from(stickyEls).map((el) => ({ el, position: el.style.position, top: el.style.top }));
+  stickyEls.forEach((el) => {
+    el.style.position = "static";
+    el.style.top = "auto";
+  });
+
   const prevStyle = {
     display: node.style.display, position: node.style.position,
     left: node.style.left, top: node.style.top,
@@ -215,6 +245,15 @@ async function renderNodeToPdf(node) {
       el.style.overflow = overflow;
       el.style.overflowX = overflowX;
       el.style.overflowY = overflowY;
+    });
+    prevAnimStyles.forEach(({ el, animation, opacity, transform }) => {
+      el.style.animation = animation;
+      el.style.opacity = opacity;
+      el.style.transform = transform;
+    });
+    prevStickyStyles.forEach(({ el, position, top }) => {
+      el.style.position = position;
+      el.style.top = top;
     });
   }
 }
