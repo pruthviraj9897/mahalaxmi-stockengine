@@ -2179,6 +2179,26 @@ function partyCode(data, id) {
   return data.parties.find((p) => p.id === id)?.code || "—";
 }
 
+// Normalizes a party's references/partners into [{name, phone}] regardless of
+// whether the stored data is the old plain-string-array format, an old single
+// "reference" string, or already the new {name, phone} object format.
+function toContactList(list, legacySingle) {
+  if (Array.isArray(list) && list.length) {
+    return list.map((item) =>
+      typeof item === "string" ? { name: item, phone: "" } : { name: item?.name || "", phone: item?.phone || "" }
+    );
+  }
+  if (legacySingle) return [{ name: legacySingle, phone: "" }];
+  return [{ name: "", phone: "" }];
+}
+// Same as above but drops blank rows — for display, not for editing forms.
+function contactListFilled(list, legacySingle) {
+  return toContactList(list, legacySingle).filter((c) => c.name.trim());
+}
+function contactLabel(c) {
+  return c.phone ? `${c.name} (${c.phone})` : c.name;
+}
+
 /* ---------------- Dashboard ---------------- */
 
 const DASHBOARD_REPORT_LABELS = {
@@ -2463,7 +2483,17 @@ function useDraftForm(key, blank, data, persist, markTyping) {
 /* ---------------- Party Master ---------------- */
 
 function PartyMaster({ data, persist, markTyping }) {
-  const blank = { name: "", address: "", siteName: "", phone: "", references: [""], gstin: "", requiresGst: false, gstType: "CGST_SGST" };
+  const blank = {
+    name: "",
+    address: "",
+    siteName: "",
+    phone: "",
+    references: [{ name: "", phone: "" }],
+    partners: [{ name: "", phone: "" }],
+    gstin: "",
+    requiresGst: false,
+    gstType: "CGST_SGST",
+  };
   const [form, setForm, resetForm, resetFormLocal, clearedDrafts] = useDraftForm("partyForm", blank, data, persist, markTyping);
   const [editingId, setEditingId] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -2473,7 +2503,12 @@ function PartyMaster({ data, persist, markTyping }) {
     if (!form.name.trim()) return;
     // Opening Balance is edited from the Party Ledger tab, not here — so it's
     // deliberately left out of this payload to avoid overwriting it on every save.
-    const payload = { ...form };
+    // Strip fully-blank reference/partner rows before saving.
+    const payload = {
+      ...form,
+      references: (form.references || []).filter((r) => r.name.trim() || r.phone.trim()),
+      partners: (form.partners || []).filter((p) => p.name.trim() || p.phone.trim()),
+    };
     let next;
     if (editingId) {
       next = { ...data, parties: data.parties.map((p) => (p.id === editingId ? { ...p, ...payload } : p)) };
@@ -2499,7 +2534,8 @@ function PartyMaster({ data, persist, markTyping }) {
       address: p.address || "",
       siteName: p.siteName || "",
       phone: p.phone || "",
-      references: p.references?.length ? p.references : (p.reference ? [p.reference] : [""]),
+      references: toContactList(p.references, p.reference),
+      partners: toContactList(p.partners),
       gstin: p.gstin || "",
       requiresGst: !!p.requiresGst,
       gstType: p.gstType || "CGST_SGST",
@@ -2526,25 +2562,37 @@ function PartyMaster({ data, persist, markTyping }) {
         </div>
         <div className="form-row" style={styles.formRow}>
           <Field label="Address" value={form.address} onChange={(v) => setForm({ ...form, address: v })} wide />
-          <div style={{ ...styles.field, minWidth: 220 }}>
+        </div>
+        <div className="form-row" style={styles.formRow}>
+          <div style={{ ...styles.field, minWidth: 320, flex: 1 }}>
             <span style={styles.fieldLabel}>References</span>
-            {(form.references || [""]).map((ref, idx) => (
+            {(form.references || [{ name: "", phone: "" }]).map((ref, idx) => (
               <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
                 <input
-                  style={{ ...styles.input, flex: 1 }}
-                  value={ref}
-                  placeholder={`Reference ${idx + 1}`}
+                  style={{ ...styles.input, flex: 2 }}
+                  value={ref.name}
+                  placeholder={`Reference ${idx + 1} name`}
                   onChange={(e) => {
-                    const refs = [...(form.references || [""])];
-                    refs[idx] = e.target.value;
+                    const refs = [...(form.references || [{ name: "", phone: "" }])];
+                    refs[idx] = { ...refs[idx], name: e.target.value };
                     setForm({ ...form, references: refs });
                   }}
                 />
-                {(form.references || [""]).length > 1 && (
+                <input
+                  style={{ ...styles.input, flex: 1 }}
+                  value={ref.phone}
+                  placeholder="Mobile no."
+                  onChange={(e) => {
+                    const refs = [...(form.references || [{ name: "", phone: "" }])];
+                    refs[idx] = { ...refs[idx], phone: e.target.value };
+                    setForm({ ...form, references: refs });
+                  }}
+                />
+                {(form.references || [{ name: "", phone: "" }]).length > 1 && (
                   <button
                     style={{ ...styles.iconBtn, color: COLORS.danger }}
                     onClick={confirmClick(() => {
-                      const refs = (form.references || [""]).filter((_, i) => i !== idx);
+                      const refs = (form.references || [{ name: "", phone: "" }]).filter((_, i) => i !== idx);
                       setForm({ ...form, references: refs });
                     }, "Are you sure?")}
                   >
@@ -2555,9 +2603,53 @@ function PartyMaster({ data, persist, markTyping }) {
             ))}
             <button
               style={{ ...styles.ghostBtn, marginTop: 2, fontSize: 11.5 }}
-              onClick={confirmClick(() => setForm({ ...form, references: [...(form.references || [""]), ""] }), "Are you sure?")}
+              onClick={confirmClick(() => setForm({ ...form, references: [...(form.references || [{ name: "", phone: "" }]), { name: "", phone: "" }] }), "Are you sure?")}
             >
               <Plus size={12} /> Add Reference
+            </button>
+          </div>
+          <div style={{ ...styles.field, minWidth: 320, flex: 1 }}>
+            <span style={styles.fieldLabel}>Partners (if this party is jointly owned)</span>
+            {(form.partners || [{ name: "", phone: "" }]).map((partner, idx) => (
+              <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
+                <input
+                  style={{ ...styles.input, flex: 2 }}
+                  value={partner.name}
+                  placeholder={`Partner ${idx + 1} name`}
+                  onChange={(e) => {
+                    const partners = [...(form.partners || [{ name: "", phone: "" }])];
+                    partners[idx] = { ...partners[idx], name: e.target.value };
+                    setForm({ ...form, partners });
+                  }}
+                />
+                <input
+                  style={{ ...styles.input, flex: 1 }}
+                  value={partner.phone}
+                  placeholder="Mobile no."
+                  onChange={(e) => {
+                    const partners = [...(form.partners || [{ name: "", phone: "" }])];
+                    partners[idx] = { ...partners[idx], phone: e.target.value };
+                    setForm({ ...form, partners });
+                  }}
+                />
+                {(form.partners || [{ name: "", phone: "" }]).length > 1 && (
+                  <button
+                    style={{ ...styles.iconBtn, color: COLORS.danger }}
+                    onClick={confirmClick(() => {
+                      const partners = (form.partners || [{ name: "", phone: "" }]).filter((_, i) => i !== idx);
+                      setForm({ ...form, partners });
+                    }, "Are you sure?")}
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              style={{ ...styles.ghostBtn, marginTop: 2, fontSize: 11.5 }}
+              onClick={confirmClick(() => setForm({ ...form, partners: [...(form.partners || [{ name: "", phone: "" }]), { name: "", phone: "" }] }), "Are you sure?")}
+            >
+              <Plus size={12} /> Add Partner
             </button>
           </div>
         </div>
@@ -2599,7 +2691,7 @@ function PartyMaster({ data, persist, markTyping }) {
           <Empty text="No parties yet — add one above." />
         ) : (
           <Table
-            cols={["Code", "Name", "Site", "Phone", "References", "GST", ""]}
+            cols={["Code", "Name", "Site", "Phone", "References", "Partners", "GST", ""]}
             titleCol={1}
             rows={data.parties.map((p) => [
               <span style={styles.codeTag}>{p.code}</span>,
@@ -2607,8 +2699,12 @@ function PartyMaster({ data, persist, markTyping }) {
               p.siteName || "—",
               p.phone || "—",
               (() => {
-                const refs = p.references?.filter(Boolean) || (p.reference ? [p.reference] : []);
-                return refs.length ? refs.join(", ") : "—";
+                const refs = contactListFilled(p.references, p.reference);
+                return refs.length ? refs.map(contactLabel).join(", ") : "—";
+              })(),
+              (() => {
+                const partners = contactListFilled(p.partners);
+                return partners.length ? partners.map(contactLabel).join(", ") : "—";
               })(),
               p.requiresGst
                 ? <span style={styles.tinyTag}>{p.gstType === "IGST" ? "IGST 18%" : "CGST+SGST 18%"}</span>
@@ -4421,7 +4517,8 @@ function InvoiceLetterhead({ data, invoice }) {
 // Shared by InvoiceSheet and AccountSummarySheet — see InvoiceLetterhead.
 function InvoicePartyHeader({ data, invoice }) {
   const party = data.parties.find((p) => p.id === invoice.partyId);
-  const refs = party?.references?.filter(Boolean) || (party?.reference ? [party.reference] : []);
+  const refs = contactListFilled(party?.references, party?.reference);
+  const partners = contactListFilled(party?.partners);
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
       {/* LEFT — party details */}
@@ -4429,7 +4526,8 @@ function InvoicePartyHeader({ data, invoice }) {
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, invoice.partyId)}</div>
         {party?.address && <div><strong>Address:</strong> {party.address}</div>}
         {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
-        {refs.length > 0 && <div><strong>Ref:</strong> {refs.join(", ")}</div>}
+        {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
+        {partners.length > 0 && <div><strong>Partners:</strong> {partners.map(contactLabel).join(", ")}</div>}
         {invoice.gst?.applicable && (
           <>
             <div><strong>Party GSTIN:</strong> {party?.gstin || "—"}</div>
