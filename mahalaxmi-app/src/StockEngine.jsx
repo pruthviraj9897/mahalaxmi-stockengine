@@ -2873,6 +2873,8 @@ function ChallanFooter() {
 // off-screen for PDF capture, same pattern as InvoiceSheet.
 function DeliveryChallanSheet({ data, challan }) {
   const party = data.parties.find((p) => p.id === challan.partyId);
+  const refs = contactListFilled(party?.references, party?.reference);
+  const partners = contactListFilled(party?.partners);
   return (
     <div className="invoice-sheet" style={styles.invoiceSheet}>
       <ChallanLetterhead data={data} badge="DELIVERY CHALLAN" />
@@ -2882,6 +2884,8 @@ function DeliveryChallanSheet({ data, challan }) {
           {party?.address && <div><strong>Address:</strong> {party.address}</div>}
           {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
           {challan.siteAddress && <div><strong>Site Address:</strong> {challan.siteAddress}</div>}
+          {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
+          {partners.length > 0 && <div><strong>Partners:</strong> {partners.map(contactLabel).join(", ")}</div>}
         </div>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
           <div><strong>Challan No.:</strong> {challan.challanNo}</div>
@@ -2911,6 +2915,8 @@ function DeliveryChallanSheet({ data, challan }) {
 // charge, plus a broken-charge total if applicable.
 function ReturnChallanSheet({ data, challan }) {
   const party = data.parties.find((p) => p.id === challan.partyId);
+  const refs = contactListFilled(party?.references, party?.reference);
+  const partners = contactListFilled(party?.partners);
   const totalBroken = round2(
     challan.lines.reduce((s, l) => s + (Number(l.brokenQty) || 0) * (Number(l.brokenRate) || 0), 0)
   );
@@ -2922,6 +2928,8 @@ function ReturnChallanSheet({ data, challan }) {
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, challan.partyId)}</div>
           {party?.address && <div><strong>Address:</strong> {party.address}</div>}
           {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
+          {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
+          {partners.length > 0 && <div><strong>Partners:</strong> {partners.map(contactLabel).join(", ")}</div>}
         </div>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
           <div><strong>Return No.:</strong> {challan.returnChallanNo}</div>
