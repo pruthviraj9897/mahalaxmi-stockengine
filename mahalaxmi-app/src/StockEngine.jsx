@@ -2881,7 +2881,7 @@ function DeliveryChallanSheet({ data, challan }) {
     <div className="invoice-sheet" style={styles.invoiceSheet}>
       <ChallanLetterhead data={data} badge="DELIVERY CHALLAN" />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
-        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, flex: "1 1 260px", minWidth: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, challan.partyId)}</div>
           {party?.address && <div><strong>Address:</strong> {party.address}</div>}
           {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
@@ -2895,7 +2895,7 @@ function DeliveryChallanSheet({ data, challan }) {
           {challan.siteAddress && <div><strong>Site Address:</strong> {challan.siteAddress}</div>}
           {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
         </div>
-        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right", flexShrink: 0, minWidth: 150, marginLeft: "auto" }}>
           <div><strong>Challan No.:</strong> {challan.challanNo}</div>
           <div><strong>Date:</strong> {fmtDateDisplay(challan.date)}</div>
           {challan.driverName && <div><strong>Driver:</strong> {challan.driverName}</div>}
@@ -2932,7 +2932,7 @@ function ReturnChallanSheet({ data, challan }) {
     <div className="invoice-sheet" style={styles.invoiceSheet}>
       <ChallanLetterhead data={data} badge="RETURN CHALLAN" />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
-        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, flex: "1 1 260px", minWidth: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, challan.partyId)}</div>
           {party?.address && <div><strong>Address:</strong> {party.address}</div>}
           {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
@@ -2945,7 +2945,7 @@ function ReturnChallanSheet({ data, challan }) {
           ))}
           {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
         </div>
-        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right", flexShrink: 0, minWidth: 150, marginLeft: "auto" }}>
           <div><strong>Return No.:</strong> {challan.returnChallanNo}</div>
           <div><strong>Date:</strong> {fmtDateDisplay(challan.date)}</div>
         </div>
@@ -4539,7 +4539,6 @@ function InvoiceLetterhead({ data, invoice }) {
 // Shared by InvoiceSheet and AccountSummarySheet — see InvoiceLetterhead.
 function InvoicePartyHeader({ data, invoice }) {
   const party = data.parties.find((p) => p.id === invoice.partyId);
-  const refs = contactListFilled(party?.references, party?.reference);
   const partners = contactListFilled(party?.partners);
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
@@ -4548,7 +4547,6 @@ function InvoicePartyHeader({ data, invoice }) {
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, invoice.partyId)}</div>
         {party?.address && <div><strong>Address:</strong> {party.address}</div>}
         {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
-        {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
         {partners.length > 0 && <div><strong>Partners:</strong> {partners.map(contactLabel).join(", ")}</div>}
         {invoice.gst?.applicable && (
           <>
