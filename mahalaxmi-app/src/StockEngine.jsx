@@ -2883,13 +2883,15 @@ function DeliveryChallanSheet({ data, challan }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, challan.partyId)}</div>
-          {partners.length > 0 && (
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 400 }}>Partner Name: </span>{partners.map(contactLabel).join(", ")}
-            </div>
-          )}
           {party?.address && <div><strong>Address:</strong> {party.address}</div>}
           {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
+          {partners.map((p, i) => (
+            <div key={i} style={{ marginTop: 6 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Partner Name: </span>{p.name}</div>
+              {party?.address && <div><strong>Address:</strong> {party.address}</div>}
+              {p.phone && <div><strong>Phone:</strong> {p.phone}</div>}
+            </div>
+          ))}
           {challan.siteAddress && <div><strong>Site Address:</strong> {challan.siteAddress}</div>}
           {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
         </div>
@@ -2932,13 +2934,15 @@ function ReturnChallanSheet({ data, challan }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, challan.partyId)}</div>
-          {partners.length > 0 && (
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 400 }}>Partner Name: </span>{partners.map(contactLabel).join(", ")}
-            </div>
-          )}
           {party?.address && <div><strong>Address:</strong> {party.address}</div>}
           {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
+          {partners.map((p, i) => (
+            <div key={i} style={{ marginTop: 6 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Partner Name: </span>{p.name}</div>
+              {party?.address && <div><strong>Address:</strong> {party.address}</div>}
+              {p.phone && <div><strong>Phone:</strong> {p.phone}</div>}
+            </div>
+          ))}
           {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
         </div>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
