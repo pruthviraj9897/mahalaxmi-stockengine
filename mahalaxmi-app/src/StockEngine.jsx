@@ -4177,7 +4177,7 @@ function InvoiceLetterhead({ data, invoice }) {
       <div style={styles.invoiceCompany}>{company.name}</div>
       <div style={styles.invoiceTagline}>{company.tagline}</div>
       <div style={styles.invoiceAddress}>{company.address} · {company.email}{company.gstin ? ` · GSTIN: ${company.gstin}` : ""}</div>
-      {invoice.gst?.applicable && <div style={{ ...styles.invoiceTagline, fontWeight: 700, marginTop: 4 }}>TAX INVOICE</div>}
+      <div style={styles.invoiceBadge}>{invoice.gst?.applicable ? "TAX INVOICE" : "INVOICE"}</div>
     </div>
   );
 }
@@ -4224,6 +4224,7 @@ function InvoiceSheet({ data, invoice }) {
           <div style={{ marginTop: 6 }}>
             <Table
               serial={false}
+              theme="invoice"
               cols={["Sr.", "Item", "Qty", "Rate/Ft/Day", "S.Date", "E.Date", "Days", "Amount"]}
               rows={invoice.lines.map((l, i) => [
                 i + 1,
@@ -4262,6 +4263,20 @@ function InvoiceSheet({ data, invoice }) {
               </>
             )}
           </div>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "flex-end",
+            marginTop: 32, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
+            fontFamily: "'Public Sans', system-ui, sans-serif",
+          }}>
+            <div style={{ fontSize: 11, color: COLORS.muted, fontStyle: "italic" }}>
+              Thank you for your business.
+            </div>
+            <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
+              <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>
+                Authorised Signatory
+              </div>
+            </div>
+          </div>
     </div>
   );
 }
@@ -4286,6 +4301,7 @@ function AccountSummarySheet({ data, invoice, accountSummary }) {
             Items Currently With Party (Not Yet Returned)
           </div>
           <Table
+            theme="invoice"
             cols={["Item", "Qty Held"]}
             rows={accountSummary.pendingItems.map((r) => [itemName(data, r.itemId), r.current])}
           />
@@ -5439,9 +5455,15 @@ function StatCard({ label, value }) {
     </div>
   );
 }
-function Table({ cols, rows, serial = true, titleCol = 0 }) {
+function Table({ cols, rows, serial = true, titleCol = 0, theme }) {
   const allCols = serial ? ["#", ...cols] : cols;
   const allRows = serial ? rows.map((r, i) => [i + 1, ...r]) : rows;
+  // "invoice" theme: solid amber header + soft zebra striping, used only on
+  // the printed invoice / account-summary line-item tables so the downloaded
+  // PDF reads as a finished document rather than a plain data grid. Every
+  // other Table() call in the app is unaffected (theme left undefined).
+  const isInvoiceTheme = theme === "invoice";
+  const thStyle = isInvoiceTheme ? styles.thInvoice : styles.th;
   // On mobile, each row renders as a stacked card instead of a scrolling table
   // (see .ui-table rules inside the max-width:768px block in globalCss).
   // data-rec marks which cell becomes the card title vs. the corner serial
@@ -5457,29 +5479,40 @@ function Table({ cols, rows, serial = true, titleCol = 0 }) {
     <div className="table-wrap" style={styles.tableWrap}>
       <table className="ui-table" style={styles.table}>
         <thead>
-          <tr>{allCols.map((c, i) => <th key={i} style={styles.th}>{c}</th>)}</tr>
+          <tr>{allCols.map((c, i) => <th key={i} style={thStyle}>{c}</th>)}</tr>
         </thead>
         <tbody>
           {allRows.map((r, i) => (
             <tr
               key={i}
               className="ui-row"
-              style={{ ...styles.tr, animationDelay: `${Math.min(i, 12) * 22}ms` }}
+              style={{
+                ...styles.tr,
+                animationDelay: `${Math.min(i, 12) * 22}ms`,
+                ...(isInvoiceTheme ? { background: i % 2 ? "#fdf6ea" : "#ffffff" } : {}),
+              }}
             >
-              {r.map((cell, j) => (
-                <td
-                  key={j}
-                  style={styles.td}
-                  data-label={allCols[j]}
-                  data-rec={j === titleIdx ? "title" : (serial && j === 0) ? "serial" : "field"}
-                >
-                  {j === titleIdx ? (
-                    <span className="ui-row-title-text">{cell}</span>
-                  ) : (
-                    <span className="ui-row-value">{cell}</span>
-                  )}
-                </td>
-              ))}
+              {r.map((cell, j) => {
+                const isLastCol = j === r.length - 1;
+                return (
+                  <td
+                    key={j}
+                    style={
+                      isInvoiceTheme && isLastCol
+                        ? { ...styles.td, ...styles.tdInvoiceAmount }
+                        : styles.td
+                    }
+                    data-label={allCols[j]}
+                    data-rec={j === titleIdx ? "title" : (serial && j === 0) ? "serial" : "field"}
+                  >
+                    {j === titleIdx ? (
+                      <span className="ui-row-title-text">{cell}</span>
+                    ) : (
+                      <span className="ui-row-value">{cell}</span>
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -6063,6 +6096,12 @@ const styles = {
   },
   tr: {},
   td: { padding: "9px 10px", fontSize: 13, borderBottom: `1px solid #f0e9dc` },
+  thInvoice: {
+    textAlign: "left", fontSize: 10.5, textTransform: "uppercase", letterSpacing: 0.5,
+    color: "#fff", padding: "9px 10px", background: COLORS.amber, fontWeight: 700,
+    fontFamily: "'Public Sans', system-ui, sans-serif",
+  },
+  tdInvoiceAmount: { fontWeight: 700, color: COLORS.amberDeep },
   codeTag: {
     fontFamily: "'SFMono-Regular', Consolas, monospace", fontSize: 11.5, background: "#f2e9d8",
     color: COLORS.amberDeep, padding: "2px 6px", borderRadius: 4,
@@ -6092,15 +6131,23 @@ const styles = {
     fontFamily: "'Public Sans', system-ui, sans-serif",
   },
   totalRowBig: {
-    fontSize: 16, borderTop: `1px solid ${COLORS.border}`, marginTop: 4, paddingTop: 8, color: COLORS.amberDeep,
+    fontSize: 16, marginTop: 8, padding: "10px 12px", color: "#fff",
+    background: COLORS.amber, borderRadius: 6,
   },
   invoiceSheet: {
-    border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 18, marginBottom: 16, background: "#fffdf9",
+    border: `1px solid ${COLORS.border}`, borderTop: `4px solid ${COLORS.amber}`,
+    borderRadius: 10, padding: 22, marginBottom: 16, background: "#fffdf9",
+    boxShadow: "0 1px 4px rgba(28,25,23,0.06)",
   },
-  invoiceLetterhead: { textAlign: "center", marginBottom: 22, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 14 },
-  invoiceCompany: { fontSize: 17, fontWeight: 700, letterSpacing: 0.3 },
+  invoiceLetterhead: { textAlign: "center", marginBottom: 22, borderBottom: `2px solid ${COLORS.amber}`, paddingBottom: 16 },
+  invoiceCompany: { fontSize: 20, fontWeight: 800, letterSpacing: 0.4, color: COLORS.amberDeep },
   invoiceTagline: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "'Public Sans', system-ui, sans-serif" },
   invoiceAddress: { fontSize: 10.5, color: COLORS.muted, marginTop: 3, fontFamily: "'Public Sans', system-ui, sans-serif" },
+  invoiceBadge: {
+    display: "inline-block", marginTop: 10, padding: "4px 16px", borderRadius: 999,
+    background: COLORS.amberDeep, color: "#fff", fontSize: 11, fontWeight: 700,
+    letterSpacing: 1, fontFamily: "'Public Sans', system-ui, sans-serif",
+  },
   invoiceMetaRow: {
     display: "flex", gap: 20, fontSize: 12.5, marginBottom: 6, fontFamily: "'Public Sans', system-ui, sans-serif", flexWrap: "wrap",
   },
