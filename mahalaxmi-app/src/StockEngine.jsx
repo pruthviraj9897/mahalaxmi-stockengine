@@ -117,6 +117,17 @@ async function exportPortalToPdf(portalClass, filename) {
   pdf.save(filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf");
 }
 
+// Same rendering as exportPortalToPdf, but takes an already-resolved DOM
+// node directly (e.g. a PrintPortal's domRef) rather than looking one up by
+// class name, and triggers a normal download instead of returning a Blob.
+// Used for per-row Delivery/Return challan downloads, where one shared
+// off-screen portal is reused for whichever row's challan is currently
+// selected — see DeliveryEntry / ReturnEntry.
+async function downloadNodeAsPdf(node, filename) {
+  const pdf = await renderNodeToPdf(node);
+  pdf.save(filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf");
+}
+
 // Same rendering as exportPortalToPdf, but returns the PDF as a Blob instead
 // of triggering a download — used when bundling several invoices into a zip
 // (see BulkInvoiceBuilder) rather than saving them one at a time.
@@ -2684,6 +2695,130 @@ function ItemMaster({ data, persist, markTyping }) {
   );
 }
 
+/* ---------------- Challan print sheets (Delivery / Return) ---------------- */
+
+// Same letterhead as the invoice, but with a caller-supplied badge label
+// instead of the GST-driven "TAX INVOICE" text — used by delivery and
+// return challans, which aren't priced invoices.
+function ChallanLetterhead({ data, badge }) {
+  const company = data.company || DEFAULT_COMPANY;
+  return (
+    <div style={styles.invoiceLetterhead}>
+      <div style={styles.invoiceCompany}>{company.name}</div>
+      <div style={styles.invoiceTagline}>{company.tagline}</div>
+      <div style={styles.invoiceAddress}>{company.address} · {company.email}{company.gstin ? ` · GSTIN: ${company.gstin}` : ""}</div>
+      <div style={styles.invoiceBadge}>{badge}</div>
+    </div>
+  );
+}
+
+// Two blank signature lines — shared by both challan sheets. Challans are
+// goods-movement documents, so "thank you for your business" (the invoice
+// footer) doesn't apply; a receiving/authorising signature pair does.
+function ChallanFooter() {
+  return (
+    <div style={{
+      display: "flex", justifyContent: "space-between", alignItems: "flex-end",
+      marginTop: 32, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
+      fontFamily: "'Public Sans', system-ui, sans-serif",
+    }}>
+      <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
+        <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Received By</div>
+      </div>
+      <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
+        <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Authorised Signatory</div>
+      </div>
+    </div>
+  );
+}
+
+// The printed delivery challan — letterhead, party/challan header (driver &
+// vehicle instead of billing period), item/qty/rate lines, and transport
+// charge / deposit if either was collected. Rendered both on-screen and
+// off-screen for PDF capture, same pattern as InvoiceSheet.
+function DeliveryChallanSheet({ data, challan }) {
+  const party = data.parties.find((p) => p.id === challan.partyId);
+  return (
+    <div className="invoice-sheet" style={styles.invoiceSheet}>
+      <ChallanLetterhead data={data} badge="DELIVERY CHALLAN" />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, challan.partyId)}</div>
+          {party?.address && <div><strong>Address:</strong> {party.address}</div>}
+          {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
+          {challan.siteAddress && <div><strong>Site Address:</strong> {challan.siteAddress}</div>}
+        </div>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
+          <div><strong>Challan No.:</strong> {challan.challanNo}</div>
+          <div><strong>Date:</strong> {fmtDateDisplay(challan.date)}</div>
+          {challan.driverName && <div><strong>Driver:</strong> {challan.driverName}</div>}
+          {challan.vehicleNumber && <div><strong>Vehicle No.:</strong> {challan.vehicleNumber}</div>}
+        </div>
+      </div>
+      <Table
+        theme="invoice"
+        cols={["Item", "Qty", "Rate/Day"]}
+        rows={challan.lines.map((l) => [itemName(data, l.itemId), l.qty, Number(l.rate || 0).toFixed(2)])}
+      />
+      {(Number(challan.transportCharge) > 0 || Number(challan.deposit) > 0) && (
+        <div style={styles.totalsBox}>
+          {Number(challan.transportCharge) > 0 && <TotalRow label="Transport Charge" value={challan.transportCharge} />}
+          {Number(challan.deposit) > 0 && <TotalRow label="Deposit Collected" value={challan.deposit} />}
+        </div>
+      )}
+      <ChallanFooter />
+    </div>
+  );
+}
+
+// The printed return challan — letterhead, party/return header, item/qty
+// lines with the delivery challan each was returned against and any broken
+// charge, plus a broken-charge total if applicable.
+function ReturnChallanSheet({ data, challan }) {
+  const party = data.parties.find((p) => p.id === challan.partyId);
+  const totalBroken = round2(
+    challan.lines.reduce((s, l) => s + (Number(l.brokenQty) || 0) * (Number(l.brokenRate) || 0), 0)
+  );
+  return (
+    <div className="invoice-sheet" style={styles.invoiceSheet}>
+      <ChallanLetterhead data={data} badge="RETURN CHALLAN" />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}><span style={{ fontSize: 12.5, fontWeight: 400 }}>Party Name: </span>{partyName(data, challan.partyId)}</div>
+          {party?.address && <div><strong>Address:</strong> {party.address}</div>}
+          {party?.phone && <div><strong>Phone:</strong> {party.phone}</div>}
+        </div>
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right" }}>
+          <div><strong>Return No.:</strong> {challan.returnChallanNo}</div>
+          <div><strong>Date:</strong> {fmtDateDisplay(challan.date)}</div>
+        </div>
+      </div>
+      <Table
+        theme="invoice"
+        cols={["Item", "Against Challan", "Qty Returned", "Broken Qty", "Broken Rate", "Broken Amt"]}
+        rows={challan.lines.map((l) => {
+          const dc = data.deliveryChallans.find((d) => d.id === l.againstChallanId);
+          const brokenAmt = (Number(l.brokenQty) || 0) * (Number(l.brokenRate) || 0);
+          return [
+            itemName(data, l.itemId),
+            dc ? `#${dc.challanNo}` : "—",
+            l.qty,
+            l.brokenQty || 0,
+            Number(l.brokenRate || 0).toFixed(2),
+            brokenAmt.toFixed(2),
+          ];
+        })}
+      />
+      {totalBroken > 0 && (
+        <div style={styles.totalsBox}>
+          <TotalRow label="Total Broken Charges" value={totalBroken} big />
+        </div>
+      )}
+      <ChallanFooter />
+    </div>
+  );
+}
+
 /* ---------------- Delivery Entry ---------------- */
 
 function DeliveryEntry({ data, persist, markTyping }) {
@@ -2709,6 +2844,29 @@ function DeliveryEntry({ data, persist, markTyping }) {
   const [sortBy, setSortBy] = useState("date"); // "date" | "updated"
   const [filterPartyId, setFilterPartyId] = useState("");
   const [listRef, scrollToList] = useScrollToRef();
+
+  // Per-row "Download PDF" — one shared off-screen portal is reused for
+  // whichever challan is currently selected (pdfChallan), same pattern as
+  // InvoicePrintView's capture portal.
+  const [pdfChallan, setPdfChallan] = useState(null);
+  const [exportingId, setExportingId] = useState(null);
+  const pdfCaptureRef = useRef(null);
+  const downloadChallanPdf = async (c) => {
+    if (exportingId) return;
+    setExportingId(c.id);
+    setPdfChallan(c);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const label = `Delivery Challan ${c.challanNo} - ${sanitizeForFilename(partyName(data, c.partyId))}`;
+      await downloadNodeAsPdf(pdfCaptureRef.current, label);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("Couldn't generate the PDF. Please try again.");
+    } finally {
+      setExportingId(null);
+      setPdfChallan(null);
+    }
+  };
 
   const setLine = (idx, patch) => {
     const next = [...lines];
@@ -2901,6 +3059,9 @@ function DeliveryEntry({ data, persist, markTyping }) {
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
                 fmtDateTime(c.updatedAt || c.createdAt),
                 <div style={{ display: "flex", gap: 6 }}>
+                  <button style={styles.iconBtn} disabled={!!exportingId} onClick={confirmClick(() => downloadChallanPdf(c), "Generate and download the PDF?")} title="Download PDF">
+                    <Download size={14} />
+                  </button>
                   <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit challan"><Pencil size={14} /></button>
                   <ConfirmDelete
                     id={c.id}
@@ -2917,6 +3078,11 @@ function DeliveryEntry({ data, persist, markTyping }) {
           </>
         )}
       </Panel>
+      {/* Off-screen node used purely for PDF capture — never shown, only
+          painted for html2canvas to read. See downloadChallanPdf above. */}
+      <PrintPortal extraClass="print-portal--delivery-challan" domRef={pdfCaptureRef}>
+        {pdfChallan && <DeliveryChallanSheet data={data} challan={pdfChallan} />}
+      </PrintPortal>
     </div>
   );
 }
@@ -2938,6 +3104,28 @@ function ReturnEntry({ data, persist, markTyping }) {
   const [sortBy, setSortBy] = useState("date"); // "date" | "updated"
   const [filterPartyId, setFilterPartyId] = useState("");
   const [listRef, scrollToList] = useScrollToRef();
+
+  // Per-row "Download PDF" — same shared off-screen portal pattern as
+  // DeliveryEntry's downloadChallanPdf.
+  const [pdfChallan, setPdfChallan] = useState(null);
+  const [exportingId, setExportingId] = useState(null);
+  const pdfCaptureRef = useRef(null);
+  const downloadChallanPdf = async (c) => {
+    if (exportingId) return;
+    setExportingId(c.id);
+    setPdfChallan(c);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const label = `Return Challan ${c.returnChallanNo} - ${sanitizeForFilename(partyName(data, c.partyId))}`;
+      await downloadNodeAsPdf(pdfCaptureRef.current, label);
+    } catch (err) {
+      console.error("PDF export failed:", err);
+      alert("Couldn't generate the PDF. Please try again.");
+    } finally {
+      setExportingId(null);
+      setPdfChallan(null);
+    }
+  };
 
   const setLine = (idx, patch) => {
     const next = [...lines];
@@ -3146,6 +3334,9 @@ function ReturnEntry({ data, persist, markTyping }) {
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
                 fmtDateTime(c.updatedAt || c.createdAt),
                 <div style={{ display: "flex", gap: 6 }}>
+                  <button style={styles.iconBtn} disabled={!!exportingId} onClick={confirmClick(() => downloadChallanPdf(c), "Generate and download the PDF?")} title="Download PDF">
+                    <Download size={14} />
+                  </button>
                   <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit return"><Pencil size={14} /></button>
                   <ConfirmDelete
                     id={c.id}
@@ -3162,6 +3353,11 @@ function ReturnEntry({ data, persist, markTyping }) {
           </>
         )}
       </Panel>
+      {/* Off-screen node used purely for PDF capture — never shown, only
+          painted for html2canvas to read. See downloadChallanPdf above. */}
+      <PrintPortal extraClass="print-portal--return-challan" domRef={pdfCaptureRef}>
+        {pdfChallan && <ReturnChallanSheet data={data} challan={pdfChallan} />}
+      </PrintPortal>
     </div>
   );
 }
