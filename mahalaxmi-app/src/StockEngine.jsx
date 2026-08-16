@@ -3032,7 +3032,7 @@ function ReturnChallanSheet({ data, challan }) {
           {refs.length > 0 && <div><strong>Ref:</strong> {refs.map(contactLabel).join(", ")}</div>}
         </div>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, textAlign: "right", flexShrink: 0, minWidth: 150, marginLeft: "auto" }}>
-          <div><strong>Return No.:</strong> {challan.returnChallanNo}</div>
+          <div><strong>Return Challan No.:</strong> {challan.returnChallanNo}</div>
           <div><strong>Date:</strong> {fmtDateDisplay(challan.date)}</div>
         </div>
       </div>
