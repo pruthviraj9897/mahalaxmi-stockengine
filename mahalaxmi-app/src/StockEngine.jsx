@@ -2856,7 +2856,7 @@ function ChallanFooter() {
   return (
     <div style={{
       display: "flex", justifyContent: "space-between", alignItems: "flex-end",
-      marginTop: 32, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
+      marginTop: 72, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
       fontFamily: "'Public Sans', system-ui, sans-serif",
     }}>
       <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
