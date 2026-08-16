@@ -2849,21 +2849,52 @@ function ChallanLetterhead({ data, badge }) {
   );
 }
 
-// Two blank signature lines — shared by both challan sheets. Challans are
-// goods-movement documents, so "thank you for your business" (the invoice
-// footer) doesn't apply; a receiving/authorising signature pair does.
-function ChallanFooter() {
+// Rent Terms + Note + declaration + signature row — shared by both challan
+// sheets. `rentLines`, when passed (delivery challan only — return challans
+// don't carry a per-day rate), lists every item actually on that challan
+// with the rate that was actually charged for it on that line (challan.lines
+// rate, not the item master's default), e.g. "Bottom 8" Plate — rent
+// charged: Rs. 5.00 per unit per day." One line per challan line, so a
+// challan with three different items shows three such lines automatically.
+// marginTop: "auto" on the outer div is what pins this whole block to the
+// bottom of the sheet (see challanSheet's flex column + min-height).
+function ChallanTermsFooter({ rentLines }) {
   return (
-    <div style={{
-      display: "flex", justifyContent: "space-between", alignItems: "flex-end",
-      marginTop: 72, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
-      fontFamily: "'Public Sans', system-ui, sans-serif",
-    }}>
-      <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
-        <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Received By</div>
+    <div style={{ marginTop: "auto" }}>
+      {rentLines && rentLines.length > 0 && (
+        <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.amberDeep, marginBottom: 6 }}>Rent Terms</div>
+          <div style={{ fontSize: 10, color: COLORS.ink, lineHeight: 1.7 }}>
+            {rentLines.map((l, i) => (
+              <div key={i}>{l.name} — rent charged: Rs. {Number(l.rate || 0).toFixed(2)} per unit per day.</div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.amberDeep, marginBottom: 6 }}>Note</div>
+        <div style={{ fontSize: 10, color: COLORS.ink, lineHeight: 1.7 }}>
+          <div>1. Minimum rent period will be 15 days.</div>
+          <div>2. Rent on a lost rented item will stop only after payment for that item has been received.</div>
+          <div>3. After delivery, the contractor is responsible for all rented items until they are returned.</div>
+          <div>4. If a rented item of any size is lost, the contractor must pay separately for it according to its size.</div>
+          <div>5. Rent will start from the day the rented item is taken, and will be calculated up to the day it is returned.</div>
+        </div>
+        <div style={{ fontSize: 10, fontStyle: "italic", color: COLORS.ink, marginTop: 10 }}>
+          I, the undersigned, agree to the above terms and am bound to return the rented item(s) whenever asked.
+        </div>
       </div>
-      <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
-        <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Authorised Signatory</div>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "flex-end",
+        marginTop: 28, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
+        fontFamily: "'Public Sans', system-ui, sans-serif",
+      }}>
+        <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
+          <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Received By</div>
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
+          <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Authorised Signatory</div>
+        </div>
       </div>
     </div>
   );
@@ -2877,8 +2908,9 @@ function DeliveryChallanSheet({ data, challan }) {
   const party = data.parties.find((p) => p.id === challan.partyId);
   const refs = contactListFilled(party?.references, party?.reference);
   const partners = contactListFilled(party?.partners);
+  const rentLines = challan.lines.map((l) => ({ name: itemName(data, l.itemId), rate: l.rate }));
   return (
-    <div className="invoice-sheet" style={styles.invoiceSheet}>
+    <div className="invoice-sheet" style={styles.challanSheet}>
       <ChallanLetterhead data={data} badge="DELIVERY CHALLAN" />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, flex: "1 1 260px", minWidth: 0 }}>
@@ -2913,7 +2945,7 @@ function DeliveryChallanSheet({ data, challan }) {
           {Number(challan.deposit) > 0 && <TotalRow label="Deposit Collected" value={challan.deposit} />}
         </div>
       )}
-      <ChallanFooter />
+      <ChallanTermsFooter rentLines={rentLines} />
     </div>
   );
 }
@@ -2929,7 +2961,7 @@ function ReturnChallanSheet({ data, challan }) {
     challan.lines.reduce((s, l) => s + (Number(l.brokenQty) || 0) * (Number(l.brokenRate) || 0), 0)
   );
   return (
-    <div className="invoice-sheet" style={styles.invoiceSheet}>
+    <div className="invoice-sheet" style={styles.challanSheet}>
       <ChallanLetterhead data={data} badge="RETURN CHALLAN" />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22, gap: 12, flexWrap: "wrap", paddingBottom: 14, borderBottom: `1px solid ${COLORS.border}` }}>
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 12.5, lineHeight: 1.7, flex: "1 1 260px", minWidth: 0 }}>
@@ -2971,7 +3003,7 @@ function ReturnChallanSheet({ data, challan }) {
           <TotalRow label="Total Broken Charges" value={totalBroken} big />
         </div>
       )}
-      <ChallanFooter />
+      <ChallanTermsFooter />
     </div>
   );
 }
@@ -6605,6 +6637,22 @@ const styles = {
     border: `1px solid ${COLORS.border}`, borderTop: `4px solid ${COLORS.amber}`,
     borderRadius: 10, padding: 22, marginBottom: 16, background: "#fffdf9",
     boxShadow: "0 1px 4px rgba(28,25,23,0.06)",
+  },
+  // Delivery/return challan sheets only (see ChallanTermsFooter). Same look
+  // as invoiceSheet, but a flex column with a min-height close to one full
+  // A4 page (297mm, minus the 10mm capture padding on each side and some
+  // buffer for this box's own border/padding — see renderNodeToPdf). Combined
+  // with ChallanTermsFooter's marginTop: "auto", this pins the terms/note/
+  // signature block near the bottom of the sheet like the printed challan
+  // pad, regardless of how short the item list above it is. A longer item
+  // list simply grows the box past one page — the footer then follows right
+  // after it rather than forcing a bottom position, which is fine since
+  // that's already overflowing onto a second printed page.
+  challanSheet: {
+    border: `1px solid ${COLORS.border}`, borderTop: `4px solid ${COLORS.amber}`,
+    borderRadius: 10, padding: 22, marginBottom: 16, background: "#fffdf9",
+    boxShadow: "0 1px 4px rgba(28,25,23,0.06)",
+    display: "flex", flexDirection: "column", minHeight: "265mm",
   },
   invoiceLetterhead: { textAlign: "center", marginBottom: 22, borderBottom: `2px solid ${COLORS.amber}`, paddingBottom: 16 },
   invoiceCompany: { fontSize: 20, fontWeight: 800, letterSpacing: 0.4, color: COLORS.amberDeep },
