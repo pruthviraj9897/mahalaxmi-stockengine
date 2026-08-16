@@ -2976,12 +2976,8 @@ function DeliveryChallanSheet({ data, challan }) {
       </div>
       <Table
         theme="invoice"
-        cols={["Item", "Qty", "Rate/Day"]}
-        rows={challan.lines.map((l, i) => [
-          lineItemNames[i],
-          l.qty,
-          parseFeet(lineItemNames[i]) ? `Rs. ${Number(l.rate || 0).toFixed(2)}/ft` : Number(l.rate || 0).toFixed(2),
-        ])}
+        cols={["Item", "Qty"]}
+        rows={challan.lines.map((l, i) => [lineItemNames[i], l.qty])}
       />
       {(Number(challan.transportCharge) > 0 || Number(challan.deposit) > 0) && (
         <div style={styles.totalsBox}>
@@ -3004,6 +3000,7 @@ function ReturnChallanSheet({ data, challan }) {
   const totalBroken = round2(
     challan.lines.reduce((s, l) => s + (Number(l.brokenQty) || 0) * (Number(l.brokenRate) || 0), 0)
   );
+  const hasBroken = challan.lines.some((l) => (Number(l.brokenQty) || 0) > 0 || (Number(l.brokenRate) || 0) > 0);
   return (
     <div className="invoice-sheet" style={styles.challanSheet}>
       <ChallanLetterhead data={data} badge="RETURN CHALLAN" />
@@ -3028,13 +3025,12 @@ function ReturnChallanSheet({ data, challan }) {
       </div>
       <Table
         theme="invoice"
-        cols={["Item", "Against Challan", "Qty Returned", "Broken Qty", "Broken Rate", "Broken Amt"]}
+        cols={hasBroken ? ["Item", "Qty Returned", "Broken Qty", "Broken Rate", "Broken Amt"] : ["Item", "Qty Returned"]}
         rows={challan.lines.map((l) => {
-          const dc = data.deliveryChallans.find((d) => d.id === l.againstChallanId);
+          if (!hasBroken) return [itemName(data, l.itemId), l.qty];
           const brokenAmt = (Number(l.brokenQty) || 0) * (Number(l.brokenRate) || 0);
           return [
             itemName(data, l.itemId),
-            dc ? `#${dc.challanNo}` : "—",
             l.qty,
             l.brokenQty || 0,
             Number(l.brokenRate || 0).toFixed(2),
