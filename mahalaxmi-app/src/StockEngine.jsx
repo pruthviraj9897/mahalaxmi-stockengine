@@ -2849,15 +2849,17 @@ function ChallanLetterhead({ data, badge }) {
   );
 }
 
-// Rent Terms + Note + declaration + signature row — shared by both challan
-// sheets. `rentLines`, when passed (delivery challan only — return challans
-// don't carry a per-day rate), lists every item actually on that challan
-// with the rate that was actually charged for it on that line (challan.lines
-// rate, not the item master's default), e.g. "Bottom 8" Plate — rent
-// charged: Rs. 5.00 per unit per day." One line per challan line, so a
-// challan with three different items shows three such lines automatically.
-// marginTop: "auto" on the outer div is what pins this whole block to the
-// bottom of the sheet (see challanSheet's flex column + min-height).
+// Rent Terms + Note + declaration + signature row — used by the delivery
+// challan only (see ReturnChallanFooter below for the return challan's own,
+// different set of terms and signature row). `rentLines` lists every item
+// actually on that challan with the rate that was actually charged for it
+// on that line (challan.lines rate, not the item master's default), e.g.
+// "Bottom 8" Plate — rent charged: Rs. 5.00 per unit per day." — or, for an
+// item priced per running foot, "... Rs. 5.00 per ft per day." One line per
+// challan line, so a challan with three different items shows three such
+// lines automatically. marginTop: "auto" on the outer div is what pins this
+// whole block to the bottom of the sheet (see challanSheet's flex column +
+// min-height).
 function ChallanTermsFooter({ rentLines }) {
   return (
     <div style={{ marginTop: "auto" }}>
@@ -2866,7 +2868,7 @@ function ChallanTermsFooter({ rentLines }) {
           <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.amberDeep, marginBottom: 6 }}>Rent Terms</div>
           <div style={{ fontSize: 10, color: COLORS.ink, lineHeight: 1.7 }}>
             {rentLines.map((l, i) => (
-              <div key={i}>{l.name} — rent charged: Rs. {Number(l.rate || 0).toFixed(2)} per unit per day.</div>
+              <div key={i}>{l.name} — rent charged: Rs. {Number(l.rate || 0).toFixed(2)} per {l.feet ? "ft" : "unit"} per day.</div>
             ))}
           </div>
         </div>
@@ -2900,6 +2902,41 @@ function ChallanTermsFooter({ rentLines }) {
   );
 }
 
+// Terms + signature row for the return challan — matches the printed return
+// challan pad, which uses a fixed collection-window / condition-on-return
+// policy rather than rent terms, and a two-signature row (challan maker /
+// returner) rather than received-by / authorised-signatory. Kept as its own
+// component (rather than folded into ChallanTermsFooter) since the wording
+// and signatories genuinely differ from the delivery challan's footer.
+function ReturnChallanFooter() {
+  return (
+    <div style={{ marginTop: "auto" }}>
+      <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.amberDeep, marginBottom: 6 }}>Terms</div>
+        <div style={{ fontSize: 10, color: COLORS.ink, lineHeight: 1.7 }}>
+          <div>1. Goods will be accepted back only in the same measurement/size as originally issued.</div>
+          <div>2. Goods will not be taken back on Sundays and public holidays.</div>
+          <div>3. Return-goods collection hours will be 9 to 12 and 3 to 6.</div>
+          <div>4. Goods will not be accepted back after 6 PM in the evening.</div>
+          <div>5. Please check against the challan before taking the goods back.</div>
+        </div>
+      </div>
+      <div style={{
+        display: "flex", justifyContent: "space-between", alignItems: "flex-end",
+        marginTop: 28, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
+        fontFamily: "'Public Sans', system-ui, sans-serif",
+      }}>
+        <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
+          <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Challan Maker's Signature</div>
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
+          <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Returner's Signature</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // The printed delivery challan — letterhead, party/challan header (driver &
 // vehicle instead of billing period), item/qty/rate lines, and transport
 // charge / deposit if either was collected. Rendered both on-screen and
@@ -2908,7 +2945,10 @@ function DeliveryChallanSheet({ data, challan }) {
   const party = data.parties.find((p) => p.id === challan.partyId);
   const refs = contactListFilled(party?.references, party?.reference);
   const partners = contactListFilled(party?.partners);
-  const rentLines = challan.lines.map((l) => ({ name: itemName(data, l.itemId), rate: l.rate }));
+  const lineItemNames = challan.lines.map((l) => itemName(data, l.itemId));
+  const rentLines = challan.lines.map((l, i) => ({
+    name: lineItemNames[i], rate: l.rate, feet: !!parseFeet(lineItemNames[i]),
+  }));
   return (
     <div className="invoice-sheet" style={styles.challanSheet}>
       <ChallanLetterhead data={data} badge="DELIVERY CHALLAN" />
@@ -2937,7 +2977,11 @@ function DeliveryChallanSheet({ data, challan }) {
       <Table
         theme="invoice"
         cols={["Item", "Qty", "Rate/Day"]}
-        rows={challan.lines.map((l) => [itemName(data, l.itemId), l.qty, Number(l.rate || 0).toFixed(2)])}
+        rows={challan.lines.map((l, i) => [
+          lineItemNames[i],
+          l.qty,
+          parseFeet(lineItemNames[i]) ? `Rs. ${Number(l.rate || 0).toFixed(2)}/ft` : Number(l.rate || 0).toFixed(2),
+        ])}
       />
       {(Number(challan.transportCharge) > 0 || Number(challan.deposit) > 0) && (
         <div style={styles.totalsBox}>
@@ -3003,7 +3047,7 @@ function ReturnChallanSheet({ data, challan }) {
           <TotalRow label="Total Broken Charges" value={totalBroken} big />
         </div>
       )}
-      <ChallanTermsFooter />
+      <ReturnChallanFooter />
     </div>
   );
 }
