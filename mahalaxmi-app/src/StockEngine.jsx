@@ -2861,14 +2861,27 @@ function ChallanLetterhead({ data, badge }) {
 // whole block to the bottom of the sheet (see challanSheet's flex column +
 // min-height).
 function ChallanTermsFooter({ rentLines }) {
+  // Group items that share the same rate AND the same unit type (per-ft vs
+  // per-unit) onto a single line, e.g. "Bottom 8" Plate, Top 8" Plate —
+  // rent charged: Rs. 5.00 per unit per day." instead of one line per item.
+  const groupedRentLines = [];
+  if (rentLines) {
+    const groups = new Map();
+    rentLines.forEach((l) => {
+      const key = `${Number(l.rate || 0).toFixed(2)}_${l.feet ? "ft" : "unit"}`;
+      if (!groups.has(key)) groups.set(key, { names: [], rate: l.rate, feet: l.feet });
+      groups.get(key).names.push(l.name);
+    });
+    groups.forEach((g) => groupedRentLines.push(g));
+  }
   return (
     <div style={{ marginTop: "auto" }}>
-      {rentLines && rentLines.length > 0 && (
+      {groupedRentLines.length > 0 && (
         <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", marginBottom: 14 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.amberDeep, marginBottom: 6 }}>Rent Terms</div>
           <div style={{ fontSize: 10, color: COLORS.ink, lineHeight: 1.7 }}>
-            {rentLines.map((l, i) => (
-              <div key={i}>{l.name} — rent charged: Rs. {Number(l.rate || 0).toFixed(2)} per {l.feet ? "ft" : "unit"} per day.</div>
+            {groupedRentLines.map((g, i) => (
+              <div key={i}>{g.names.join(", ")} — rent charged: Rs. {Number(g.rate || 0).toFixed(2)} per {g.feet ? "ft" : "unit"} per day.</div>
             ))}
           </div>
         </div>
