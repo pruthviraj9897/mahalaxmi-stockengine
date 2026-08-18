@@ -130,9 +130,13 @@ async function downloadNodeAsPdf(node, filename) {
 
 // Same rendering as exportPortalToPdf, but returns the PDF as a Blob instead
 // of triggering a download — used when bundling several invoices into a zip
-// (see BulkInvoiceBuilder) rather than saving them one at a time.
-async function pdfBlobFromNode(node) {
-  const pdf = await renderNodeToPdf(node);
+// (see BulkInvoiceBuilder) rather than saving them one at a time, and for
+// WhatsApp sharing (see sharePdfToWhatsApp below). `scale` is forwarded to
+// renderNodeToPdf — WhatsApp shares pass a lower scale to render faster and
+// keep the share inside the browser's user-gesture window (see the
+// WhatsApp share section below for why that matters).
+async function pdfBlobFromNode(node, scale) {
+  const pdf = await renderNodeToPdf(node, scale);
   return pdf.output("blob");
 }
 
@@ -324,9 +328,15 @@ function WhatsAppQueuePanel({ items, onClose }) {
 }
 
 // Core of the html2canvas → jsPDF pipeline, shared by exportPortalToPdf
-// (single download) and pdfBlobFromNode (zip bundling). Renders `node` —
-// normally an off-screen print-portal node — to a paginated A4 jsPDF object.
-async function renderNodeToPdf(node) {
+// (single download) and pdfBlobFromNode (zip bundling / WhatsApp share).
+// Renders `node` — normally an off-screen print-portal node — to a
+// paginated A4 jsPDF object. `scale` controls html2canvas's render
+// resolution; defaults to 3x (print quality). Callers that need the PDF
+// fast — i.e. WhatsApp sharing, where html2canvas running past the
+// browser's user-gesture window causes the native share sheet to silently
+// fail — pass a lower scale instead, since a phone screen or WhatsApp
+// preview doesn't need print-grade resolution.
+async function renderNodeToPdf(node, scale = 3) {
   // Expand any scrollable table containers so the full table gets captured,
   // not just the scrolled viewport — same as the old print CSS did.
   const wraps = node.querySelectorAll(".table-wrap");
@@ -392,10 +402,11 @@ async function renderNodeToPdf(node) {
   try {
     const { html2canvas, jsPDF } = await loadPdfLibs();
     const canvas = await html2canvas(node, {
-      // Fixed at 3x (rather than capped at 2x by devicePixelRatio) so text
+      // Fixed scale (rather than capped at 2x by devicePixelRatio) so text
       // and table rules stay crisp when zoomed, regardless of the exporting
-      // device's screen density.
-      scale: 3,
+      // device's screen density. Downloads use 3x for print quality;
+      // WhatsApp shares pass a lower scale (see function comment above).
+      scale,
       useCORS: true,
       backgroundColor: "#ffffff",
     });
@@ -3333,7 +3344,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
     setPdfChallan(c);
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const blob = await pdfBlobFromNode(pdfCaptureRef.current);
+      const blob = await pdfBlobFromNode(pdfCaptureRef.current, 1.5); // lower scale: renders fast enough to stay inside the WhatsApp share gesture window
       const party = data.parties.find((p) => p.id === c.partyId);
       return {
         blob,
@@ -3722,7 +3733,7 @@ function ReturnEntry({ data, persist, markTyping }) {
     setPdfChallan(c);
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const blob = await pdfBlobFromNode(pdfCaptureRef.current);
+      const blob = await pdfBlobFromNode(pdfCaptureRef.current, 1.5); // lower scale: renders fast enough to stay inside the WhatsApp share gesture window
       const party = data.parties.find((p) => p.id === c.partyId);
       return {
         blob,
@@ -4954,7 +4965,7 @@ function InvoiceArchive({ data, persist }) {
     setPdfInvoice(inv);
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const blob = await pdfBlobFromNode(shareCaptureRef.current);
+      const blob = await pdfBlobFromNode(shareCaptureRef.current, 1.5); // lower scale: renders fast enough to stay inside the WhatsApp share gesture window
       const party = data.parties.find((p) => p.id === inv.partyId);
       const total = Number((inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal) || 0).toFixed(2);
       return {
@@ -5464,7 +5475,7 @@ function InvoicePrintView({ data, invoice }) {
 
       setCapture({ kind: "invoice" });
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const blob = await pdfBlobFromNode(captureRef.current);
+      const blob = await pdfBlobFromNode(captureRef.current, 1.5); // lower scale: renders fast enough to stay inside the WhatsApp share gesture window
       const built = {
         blob,
         filename: `Invoice ${invoice.invoiceNo} - ${partyLabel}`,
