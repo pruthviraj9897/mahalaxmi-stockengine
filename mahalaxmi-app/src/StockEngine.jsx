@@ -160,26 +160,32 @@ function toWhatsAppNumber(raw) {
   return digits; // already has a country code, or an unusual format — best effort
 }
 
-// Shares one PDF Blob to WhatsApp for a single party/contact. Returns a
-// short status string the caller can use to show the right follow-up
-// message: "shared" (native share sheet opened), "fallback" (downloaded +
-// wa.me opened instead), "cancelled" (person backed out of the share
-// sheet), or throws on a hard failure.
-async function sharePdfToWhatsApp(blob, filename, phoneRaw, message) {
+// Attempts the native share sheet only — no download/wa.me fallback. Returns
+// "shared" (opened fine), "cancelled" (person backed out), or "needs-retry"
+// (unsupported, or navigator.share() failed — most commonly because the PDF
+// took long enough to generate that the browser's user-gesture window
+// expired). Callers use "needs-retry" to offer a same-gesture retry tap
+// rather than silently falling back, since a fresh tap is far more likely
+// to succeed than the same call that just failed.
+async function tryNativeShare(blob, filename, message) {
   const fname = filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf";
   const file = new File([blob], fname, { type: "application/pdf" });
-  const waNumber = toWhatsAppNumber(phoneRaw);
-
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file], text: message || undefined });
-      return "shared";
-    } catch (err) {
-      if (err && err.name === "AbortError") return "cancelled";
-      // fall through to the download + wa.me fallback below
-    }
+  if (!(navigator.canShare && navigator.canShare({ files: [file] }))) return "needs-retry";
+  try {
+    await navigator.share({ files: [file], text: message || undefined });
+    return "shared";
+  } catch (err) {
+    if (err && err.name === "AbortError") return "cancelled";
+    return "needs-retry";
   }
+}
 
+// Last-resort fallback when native sharing isn't available at all: downloads
+// the PDF and opens WhatsApp (to the right contact, if we have their number)
+// with a message pre-filled — the person just attaches the file that was
+// downloaded a moment ago.
+function downloadAndOpenWhatsApp(blob, filename, phoneRaw, message) {
+  const fname = filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf";
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -189,9 +195,23 @@ async function sharePdfToWhatsApp(blob, filename, phoneRaw, message) {
   a.remove();
   URL.revokeObjectURL(url);
 
+  const waNumber = toWhatsAppNumber(phoneRaw);
   const text = encodeURIComponent(message || "");
   const waUrl = waNumber ? `https://wa.me/${waNumber}?text=${text}` : `https://wa.me/?text=${text}`;
   window.open(waUrl, "_blank");
+}
+
+// Shares one PDF Blob to WhatsApp for a single party/contact, with the full
+// automatic fallback chain: native share sheet first, and if that isn't
+// available/fails, download + open wa.me. Returns a short status string:
+// "shared", "fallback", or "cancelled". Used for the always-fresh-gesture
+// retry tap (see tryNativeShare above) — by that point one native attempt
+// has already failed, so falling all the way back automatically is the
+// right call rather than asking for a third tap.
+async function sharePdfToWhatsApp(blob, filename, phoneRaw, message) {
+  const result = await tryNativeShare(blob, filename, message);
+  if (result === "shared" || result === "cancelled") return result;
+  downloadAndOpenWhatsApp(blob, filename, phoneRaw, message);
   return "fallback";
 }
 
@@ -203,28 +223,33 @@ async function sharePdfToWhatsApp(blob, filename, phoneRaw, message) {
 // native share sheet (or the download+wa.me fallback), then move to the
 // next. `items` is [{ id, label, phone, buildShare: async () => ({ blob,
 // filename, message }) }].
-// Split into two taps because navigator.share() only fires reliably inside
-// a fresh user-gesture window: PDF generation (html2canvas) can take long
-// enough to burn through that window, which made the browser silently drop
-// the share and fall back to a plain wa.me tab. So tap 1 only builds the
-// PDF (no gesture-sensitive call yet); once it's ready, tap 2 calls
-// sharePdfToWhatsApp() with nothing async ahead of it, so the share sheet
-// opens in the same gesture that triggered it.
+// Hybrid one-tap-first flow: tap 1 builds the PDF and immediately attempts
+// the native share. Most of the time the PDF is ready fast enough that the
+// user-gesture window is still open, so this succeeds in one tap. Only when
+// that attempt comes back "needs-retry" (window expired, or Web Share isn't
+// available) does the button flip to "Send now" for a same-gesture retry —
+// so the two-tap flow only shows up as a fallback, not the default path.
 function WhatsAppQueuePanel({ items, onClose }) {
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [ready, setReady] = useState(null); // { blob, filename, message } for the current item, once prepared
+  const [ready, setReady] = useState(null); // { blob, filename, message } — set only when a retry tap is needed
   const [status, setStatus] = useState(null); // null | "shared" | "fallback" | "error"
   const total = items.length;
   const current = items[index];
 
-  const prepareCurrent = async () => {
+  const shareCurrent = async () => {
     if (!current || busy) return;
     setBusy(true);
     setStatus(null);
     try {
       const built = await current.buildShare();
-      setReady(built);
+      const result = await tryNativeShare(built.blob, built.filename, built.message);
+      if (result === "needs-retry") {
+        setReady(built);
+      } else {
+        setReady(null);
+        setStatus(result === "cancelled" ? null : "shared");
+      }
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       setStatus("error");
@@ -233,12 +258,12 @@ function WhatsAppQueuePanel({ items, onClose }) {
     }
   };
 
-  const sendCurrent = async () => {
+  const retryCurrent = async () => {
     if (!current || !ready) return;
-    const { blob, filename, message } = ready;
+    const built = ready;
     setReady(null);
     try {
-      const result = await sharePdfToWhatsApp(blob, filename, current.phone, message);
+      const result = await sharePdfToWhatsApp(built.blob, built.filename, current.phone, built.message);
       setStatus(result === "cancelled" ? null : result);
     } catch (err) {
       console.error("WhatsApp share failed:", err);
@@ -272,18 +297,18 @@ function WhatsAppQueuePanel({ items, onClose }) {
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         {ready ? (
-          <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} onClick={sendCurrent}>
+          <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} onClick={retryCurrent}>
             <MessageCircle size={15} /> Send now
           </button>
         ) : (
-          <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} disabled={busy} onClick={prepareCurrent}>
+          <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} disabled={busy} onClick={shareCurrent}>
             <MessageCircle size={15} /> {busy ? "Preparing…" : "Share to WhatsApp"}
           </button>
         )}
         <button style={styles.ghostBtn} onClick={goNext}>{index + 1 >= total ? "Done" : "Next"}</button>
       </div>
       {ready && (
-        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8 }}>PDF ready — tap "Send now" to open the share sheet.</div>
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8 }}>Couldn't open the share sheet automatically — tap "Send now" to try again.</div>
       )}
       {status === "shared" && (
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8 }}>Share sheet opened — pick WhatsApp to send. Tap Next once it's sent.</div>
@@ -3320,16 +3345,23 @@ function DeliveryEntry({ data, persist, markTyping }) {
       setPdfChallan(null);
     }
   };
-  // Two-tap split (see WhatsAppQueuePanel comment above for why): tap 1
-  // builds the PDF and stashes it in shareReady, tap 2 fires the share with
-  // nothing async ahead of it.
-  const [shareReady, setShareReady] = useState({}); // challan id -> { blob, filename, message, phone }
-  const prepareChallanShare = async (c) => {
+  // Hybrid one-tap-first (see WhatsAppQueuePanel comment above): first tap
+  // builds the PDF and immediately attempts the native share. Only when
+  // that attempt needs a retry (gesture window expired, or unsupported)
+  // does the button flip to "Send now" for a same-gesture retry.
+  const [shareReady, setShareReady] = useState({}); // challan id -> built share, only set when a retry is needed
+  const shareChallanToWhatsApp = async (c) => {
     if (exportingId) return;
     setExportingId(c.id);
     try {
       const built = await buildChallanShare(c);
-      setShareReady((prev) => ({ ...prev, [c.id]: built }));
+      const result = await tryNativeShare(built.blob, built.filename, built.message);
+      setShareReady((prev) => {
+        const next = { ...prev };
+        if (result === "needs-retry") next[c.id] = built;
+        else delete next[c.id];
+        return next;
+      });
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
@@ -3585,7 +3617,7 @@ function DeliveryEntry({ data, persist, markTyping }) {
                       className="mobile-only"
                       style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
                       disabled={!!exportingId}
-                      onClick={confirmClick(() => prepareChallanShare(c), "Generate the PDF and open WhatsApp share?")}
+                      onClick={confirmClick(() => shareChallanToWhatsApp(c), "Generate the PDF and open WhatsApp share?")}
                       title="Share to WhatsApp"
                     >
                       <MessageCircle size={14} />
@@ -3702,16 +3734,23 @@ function ReturnEntry({ data, persist, markTyping }) {
       setPdfChallan(null);
     }
   };
-  // Two-tap split (see WhatsAppQueuePanel comment above for why): tap 1
-  // builds the PDF and stashes it in shareReady, tap 2 fires the share with
-  // nothing async ahead of it.
-  const [shareReady, setShareReady] = useState({}); // challan id -> { blob, filename, message, phone }
-  const prepareChallanShare = async (c) => {
+  // Hybrid one-tap-first (see WhatsAppQueuePanel comment above): first tap
+  // builds the PDF and immediately attempts the native share. Only when
+  // that attempt needs a retry (gesture window expired, or unsupported)
+  // does the button flip to "Send now" for a same-gesture retry.
+  const [shareReady, setShareReady] = useState({}); // challan id -> built share, only set when a retry is needed
+  const shareChallanToWhatsApp = async (c) => {
     if (exportingId) return;
     setExportingId(c.id);
     try {
       const built = await buildChallanShare(c);
-      setShareReady((prev) => ({ ...prev, [c.id]: built }));
+      const result = await tryNativeShare(built.blob, built.filename, built.message);
+      setShareReady((prev) => {
+        const next = { ...prev };
+        if (result === "needs-retry") next[c.id] = built;
+        else delete next[c.id];
+        return next;
+      });
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
@@ -3983,7 +4022,7 @@ function ReturnEntry({ data, persist, markTyping }) {
                       className="mobile-only"
                       style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
                       disabled={!!exportingId}
-                      onClick={confirmClick(() => prepareChallanShare(c), "Generate the PDF and open WhatsApp share?")}
+                      onClick={confirmClick(() => shareChallanToWhatsApp(c), "Generate the PDF and open WhatsApp share?")}
                       title="Share to WhatsApp"
                     >
                       <MessageCircle size={14} />
@@ -4928,16 +4967,23 @@ function InvoiceArchive({ data, persist }) {
       setPdfInvoice(null);
     }
   };
-  // Two-tap split (see WhatsAppQueuePanel comment above for why): tap 1
-  // builds the PDF and stashes it in shareReady, tap 2 fires the share with
-  // nothing async ahead of it.
-  const [shareReady, setShareReady] = useState({}); // invoice id -> { blob, filename, message, phone }
-  const prepareInvoiceShare = async (inv) => {
+  // Hybrid one-tap-first (see WhatsAppQueuePanel comment above): first tap
+  // builds the PDF and immediately attempts the native share. Only when
+  // that attempt needs a retry (gesture window expired, or unsupported)
+  // does the button flip to "Send now" for a same-gesture retry.
+  const [shareReady, setShareReady] = useState({}); // invoice id -> built share, only set when a retry is needed
+  const shareInvoiceToWhatsApp = async (inv) => {
     if (exportingId) return;
     setExportingId(inv.id);
     try {
       const built = await buildInvoiceShare(inv);
-      setShareReady((prev) => ({ ...prev, [inv.id]: built }));
+      const result = await tryNativeShare(built.blob, built.filename, built.message);
+      setShareReady((prev) => {
+        const next = { ...prev };
+        if (result === "needs-retry") next[inv.id] = built;
+        else delete next[inv.id];
+        return next;
+      });
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
@@ -5067,7 +5113,7 @@ function InvoiceArchive({ data, persist }) {
             className="mobile-only"
             style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
             disabled={!!exportingId}
-            onClick={confirmClick(() => prepareInvoiceShare(inv), "Generate the invoice PDF and open WhatsApp share?")}
+            onClick={confirmClick(() => shareInvoiceToWhatsApp(inv), "Generate the invoice PDF and open WhatsApp share?")}
             title="Share to WhatsApp"
           >
             <MessageCircle size={14} />
@@ -5402,12 +5448,13 @@ function InvoicePrintView({ data, invoice }) {
 
   // Mobile-only "Share to WhatsApp" — shares just the Invoice PDF itself
   // (not the companion statement bundled by Download above), reusing the
-  // same off-screen capture node. Two-tap split (see WhatsAppQueuePanel
-  // comment above for why): tap 1 builds the PDF and stashes it in
-  // shareReady, tap 2 fires the share with nothing async ahead of it.
+  // same off-screen capture node. Hybrid one-tap-first (see
+  // WhatsAppQueuePanel comment above): first tap builds the PDF and
+  // immediately attempts the native share; only when that needs a retry
+  // does the button flip to "Send now" for a same-gesture retry.
   const [sharing, setSharing] = useState(false);
-  const [shareReady, setShareReady] = useState(null); // { blob, filename, message } once prepared
-  const prepareShare = async () => {
+  const [shareReady, setShareReady] = useState(null); // { blob, filename, message, phone } — set only when a retry is needed
+  const handleShare = async () => {
     if (sharing) return;
     setSharing(true);
     try {
@@ -5418,12 +5465,14 @@ function InvoicePrintView({ data, invoice }) {
       setCapture({ kind: "invoice" });
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const blob = await pdfBlobFromNode(captureRef.current);
-      setShareReady({
+      const built = {
         blob,
         filename: `Invoice ${invoice.invoiceNo} - ${partyLabel}`,
         message: `Invoice #${invoice.invoiceNo}, dated ${fmtDateDisplay(invoice.invoiceDate)} — Total ₹${total}.`,
         phone: party?.phone || "",
-      });
+      };
+      const result = await tryNativeShare(built.blob, built.filename, built.message);
+      setShareReady(result === "needs-retry" ? built : null);
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
@@ -5463,7 +5512,7 @@ function InvoicePrintView({ data, invoice }) {
             className="mobile-only"
             style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }}
             disabled={sharing}
-            onClick={confirmClick(prepareShare, "Generate the invoice PDF and open WhatsApp share?")}
+            onClick={confirmClick(handleShare, "Generate the invoice PDF and open WhatsApp share?")}
           >
             <MessageCircle size={15} /> {sharing ? "Preparing…" : "Share to WhatsApp"}
           </button>
