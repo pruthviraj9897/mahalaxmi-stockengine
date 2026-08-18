@@ -249,11 +249,6 @@ function WhatsAppQueuePanel({ items, onClose }) {
           <X size={14} />
         </button>
       </div>
-      {!current.phone && (
-        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 4 }}>
-          No mobile number on file for this party — you'll pick the contact manually in WhatsApp.
-        </div>
-      )}
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} disabled={busy} onClick={sendCurrent}>
           <MessageCircle size={15} /> {busy ? "Preparing…" : "Share to WhatsApp"}
