@@ -203,21 +203,28 @@ async function sharePdfToWhatsApp(blob, filename, phoneRaw, message) {
 // native share sheet (or the download+wa.me fallback), then move to the
 // next. `items` is [{ id, label, phone, buildShare: async () => ({ blob,
 // filename, message }) }].
+// Split into two taps because navigator.share() only fires reliably inside
+// a fresh user-gesture window: PDF generation (html2canvas) can take long
+// enough to burn through that window, which made the browser silently drop
+// the share and fall back to a plain wa.me tab. So tap 1 only builds the
+// PDF (no gesture-sensitive call yet); once it's ready, tap 2 calls
+// sharePdfToWhatsApp() with nothing async ahead of it, so the share sheet
+// opens in the same gesture that triggered it.
 function WhatsAppQueuePanel({ items, onClose }) {
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [ready, setReady] = useState(null); // { blob, filename, message } for the current item, once prepared
   const [status, setStatus] = useState(null); // null | "shared" | "fallback" | "error"
   const total = items.length;
   const current = items[index];
 
-  const sendCurrent = async () => {
+  const prepareCurrent = async () => {
     if (!current || busy) return;
     setBusy(true);
     setStatus(null);
     try {
-      const { blob, filename, message } = await current.buildShare();
-      const result = await sharePdfToWhatsApp(blob, filename, current.phone, message);
-      setStatus(result === "cancelled" ? null : result);
+      const built = await current.buildShare();
+      setReady(built);
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       setStatus("error");
@@ -226,8 +233,22 @@ function WhatsAppQueuePanel({ items, onClose }) {
     }
   };
 
+  const sendCurrent = async () => {
+    if (!current || !ready) return;
+    const { blob, filename, message } = ready;
+    setReady(null);
+    try {
+      const result = await sharePdfToWhatsApp(blob, filename, current.phone, message);
+      setStatus(result === "cancelled" ? null : result);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      setStatus("error");
+    }
+  };
+
   const goNext = () => {
     setStatus(null);
+    setReady(null);
     if (index + 1 >= total) onClose();
     else setIndex(index + 1);
   };
@@ -250,11 +271,20 @@ function WhatsAppQueuePanel({ items, onClose }) {
         </button>
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} disabled={busy} onClick={sendCurrent}>
-          <MessageCircle size={15} /> {busy ? "Preparing…" : "Share to WhatsApp"}
-        </button>
+        {ready ? (
+          <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} onClick={sendCurrent}>
+            <MessageCircle size={15} /> Send now
+          </button>
+        ) : (
+          <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} disabled={busy} onClick={prepareCurrent}>
+            <MessageCircle size={15} /> {busy ? "Preparing…" : "Share to WhatsApp"}
+          </button>
+        )}
         <button style={styles.ghostBtn} onClick={goNext}>{index + 1 >= total ? "Done" : "Next"}</button>
       </div>
+      {ready && (
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8 }}>PDF ready — tap "Send now" to open the share sheet.</div>
+      )}
       {status === "shared" && (
         <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8 }}>Share sheet opened — pick WhatsApp to send. Tap Next once it's sent.</div>
       )}
@@ -3290,17 +3320,36 @@ function DeliveryEntry({ data, persist, markTyping }) {
       setPdfChallan(null);
     }
   };
-  const shareChallanToWhatsApp = async (c) => {
+  // Two-tap split (see WhatsAppQueuePanel comment above for why): tap 1
+  // builds the PDF and stashes it in shareReady, tap 2 fires the share with
+  // nothing async ahead of it.
+  const [shareReady, setShareReady] = useState({}); // challan id -> { blob, filename, message, phone }
+  const prepareChallanShare = async (c) => {
     if (exportingId) return;
     setExportingId(c.id);
     try {
-      const { blob, filename, message, phone } = await buildChallanShare(c);
-      await sharePdfToWhatsApp(blob, filename, phone, message);
+      const built = await buildChallanShare(c);
+      setShareReady((prev) => ({ ...prev, [c.id]: built }));
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
     } finally {
       setExportingId(null);
+    }
+  };
+  const sendChallanShare = async (c) => {
+    const built = shareReady[c.id];
+    if (!built) return;
+    setShareReady((prev) => {
+      const next = { ...prev };
+      delete next[c.id];
+      return next;
+    });
+    try {
+      await sharePdfToWhatsApp(built.blob, built.filename, built.phone, built.message);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't open WhatsApp. Please try again.");
     }
   };
   const startBulkShare = () => {
@@ -3522,15 +3571,26 @@ function DeliveryEntry({ data, persist, markTyping }) {
                   <button style={styles.iconBtn} disabled={!!exportingId} onClick={confirmClick(() => downloadChallanPdf(c), "Generate and download the PDF?")} title="Download PDF">
                     <Download size={14} />
                   </button>
-                  <button
-                    className="mobile-only"
-                    style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
-                    disabled={!!exportingId}
-                    onClick={confirmClick(() => shareChallanToWhatsApp(c), "Generate the PDF and open WhatsApp share?")}
-                    title="Share to WhatsApp"
-                  >
-                    <MessageCircle size={14} />
-                  </button>
+                  {shareReady[c.id] ? (
+                    <button
+                      className="mobile-only"
+                      style={{ ...styles.iconBtn, color: "#fff", background: "#25D366", borderColor: "#25D366" }}
+                      onClick={confirmClick(() => sendChallanShare(c), "Open WhatsApp now?")}
+                      title="Send to WhatsApp"
+                    >
+                      <MessageCircle size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      className="mobile-only"
+                      style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
+                      disabled={!!exportingId}
+                      onClick={confirmClick(() => prepareChallanShare(c), "Generate the PDF and open WhatsApp share?")}
+                      title="Share to WhatsApp"
+                    >
+                      <MessageCircle size={14} />
+                    </button>
+                  )}
                   <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit challan"><Pencil size={14} /></button>
                   <ConfirmDelete
                     id={c.id}
@@ -3642,17 +3702,36 @@ function ReturnEntry({ data, persist, markTyping }) {
       setPdfChallan(null);
     }
   };
-  const shareChallanToWhatsApp = async (c) => {
+  // Two-tap split (see WhatsAppQueuePanel comment above for why): tap 1
+  // builds the PDF and stashes it in shareReady, tap 2 fires the share with
+  // nothing async ahead of it.
+  const [shareReady, setShareReady] = useState({}); // challan id -> { blob, filename, message, phone }
+  const prepareChallanShare = async (c) => {
     if (exportingId) return;
     setExportingId(c.id);
     try {
-      const { blob, filename, message, phone } = await buildChallanShare(c);
-      await sharePdfToWhatsApp(blob, filename, phone, message);
+      const built = await buildChallanShare(c);
+      setShareReady((prev) => ({ ...prev, [c.id]: built }));
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
     } finally {
       setExportingId(null);
+    }
+  };
+  const sendChallanShare = async (c) => {
+    const built = shareReady[c.id];
+    if (!built) return;
+    setShareReady((prev) => {
+      const next = { ...prev };
+      delete next[c.id];
+      return next;
+    });
+    try {
+      await sharePdfToWhatsApp(built.blob, built.filename, built.phone, built.message);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't open WhatsApp. Please try again.");
     }
   };
   const startBulkShare = () => {
@@ -3890,15 +3969,26 @@ function ReturnEntry({ data, persist, markTyping }) {
                   <button style={styles.iconBtn} disabled={!!exportingId} onClick={confirmClick(() => downloadChallanPdf(c), "Generate and download the PDF?")} title="Download PDF">
                     <Download size={14} />
                   </button>
-                  <button
-                    className="mobile-only"
-                    style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
-                    disabled={!!exportingId}
-                    onClick={confirmClick(() => shareChallanToWhatsApp(c), "Generate the PDF and open WhatsApp share?")}
-                    title="Share to WhatsApp"
-                  >
-                    <MessageCircle size={14} />
-                  </button>
+                  {shareReady[c.id] ? (
+                    <button
+                      className="mobile-only"
+                      style={{ ...styles.iconBtn, color: "#fff", background: "#25D366", borderColor: "#25D366" }}
+                      onClick={confirmClick(() => sendChallanShare(c), "Open WhatsApp now?")}
+                      title="Send to WhatsApp"
+                    >
+                      <MessageCircle size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      className="mobile-only"
+                      style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
+                      disabled={!!exportingId}
+                      onClick={confirmClick(() => prepareChallanShare(c), "Generate the PDF and open WhatsApp share?")}
+                      title="Share to WhatsApp"
+                    >
+                      <MessageCircle size={14} />
+                    </button>
+                  )}
                   <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit return"><Pencil size={14} /></button>
                   <ConfirmDelete
                     id={c.id}
@@ -4838,17 +4928,36 @@ function InvoiceArchive({ data, persist }) {
       setPdfInvoice(null);
     }
   };
-  const shareInvoiceToWhatsApp = async (inv) => {
+  // Two-tap split (see WhatsAppQueuePanel comment above for why): tap 1
+  // builds the PDF and stashes it in shareReady, tap 2 fires the share with
+  // nothing async ahead of it.
+  const [shareReady, setShareReady] = useState({}); // invoice id -> { blob, filename, message, phone }
+  const prepareInvoiceShare = async (inv) => {
     if (exportingId) return;
     setExportingId(inv.id);
     try {
-      const { blob, filename, message, phone } = await buildInvoiceShare(inv);
-      await sharePdfToWhatsApp(blob, filename, phone, message);
+      const built = await buildInvoiceShare(inv);
+      setShareReady((prev) => ({ ...prev, [inv.id]: built }));
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
     } finally {
       setExportingId(null);
+    }
+  };
+  const sendInvoiceShare = async (inv) => {
+    const built = shareReady[inv.id];
+    if (!built) return;
+    setShareReady((prev) => {
+      const next = { ...prev };
+      delete next[inv.id];
+      return next;
+    });
+    try {
+      await sharePdfToWhatsApp(built.blob, built.filename, built.phone, built.message);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't open WhatsApp. Please try again.");
     }
   };
   const startBulkShare = () => {
@@ -4944,15 +5053,26 @@ function InvoiceArchive({ data, persist }) {
           title="Select for WhatsApp"
         />
         <button style={styles.ghostBtn} onClick={confirmClick(() => setSelectedId(inv.id), "Are you sure?")}><Printer size={13} /> View</button>
-        <button
-          className="mobile-only"
-          style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
-          disabled={!!exportingId}
-          onClick={confirmClick(() => shareInvoiceToWhatsApp(inv), "Generate the invoice PDF and open WhatsApp share?")}
-          title="Share to WhatsApp"
-        >
-          <MessageCircle size={14} />
-        </button>
+        {shareReady[inv.id] ? (
+          <button
+            className="mobile-only"
+            style={{ ...styles.iconBtn, color: "#fff", background: "#25D366", borderColor: "#25D366" }}
+            onClick={confirmClick(() => sendInvoiceShare(inv), "Open WhatsApp now?")}
+            title="Send to WhatsApp"
+          >
+            <MessageCircle size={14} />
+          </button>
+        ) : (
+          <button
+            className="mobile-only"
+            style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
+            disabled={!!exportingId}
+            onClick={confirmClick(() => prepareInvoiceShare(inv), "Generate the invoice PDF and open WhatsApp share?")}
+            title="Share to WhatsApp"
+          >
+            <MessageCircle size={14} />
+          </button>
+        )}
         <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmVoidId(inv.id), "Are you sure?")} title="Void invoice"><Ban size={14} /></button>
       </div>
     ),
@@ -5282,9 +5402,12 @@ function InvoicePrintView({ data, invoice }) {
 
   // Mobile-only "Share to WhatsApp" — shares just the Invoice PDF itself
   // (not the companion statement bundled by Download above), reusing the
-  // same off-screen capture node.
+  // same off-screen capture node. Two-tap split (see WhatsAppQueuePanel
+  // comment above for why): tap 1 builds the PDF and stashes it in
+  // shareReady, tap 2 fires the share with nothing async ahead of it.
   const [sharing, setSharing] = useState(false);
-  const handleShare = async () => {
+  const [shareReady, setShareReady] = useState(null); // { blob, filename, message } once prepared
+  const prepareShare = async () => {
     if (sharing) return;
     setSharing(true);
     try {
@@ -5295,18 +5418,29 @@ function InvoicePrintView({ data, invoice }) {
       setCapture({ kind: "invoice" });
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const blob = await pdfBlobFromNode(captureRef.current);
-      await sharePdfToWhatsApp(
+      setShareReady({
         blob,
-        `Invoice ${invoice.invoiceNo} - ${partyLabel}`,
-        party?.phone || "",
-        `Invoice #${invoice.invoiceNo}, dated ${fmtDateDisplay(invoice.invoiceDate)} — Total ₹${total}.`
-      );
+        filename: `Invoice ${invoice.invoiceNo} - ${partyLabel}`,
+        message: `Invoice #${invoice.invoiceNo}, dated ${fmtDateDisplay(invoice.invoiceDate)} — Total ₹${total}.`,
+        phone: party?.phone || "",
+      });
     } catch (err) {
       console.error("WhatsApp share failed:", err);
       alert("Couldn't prepare the PDF. Please try again.");
     } finally {
       setSharing(false);
       setCapture(null);
+    }
+  };
+  const sendShare = async () => {
+    if (!shareReady) return;
+    const { blob, filename, message, phone } = shareReady;
+    setShareReady(null);
+    try {
+      await sharePdfToWhatsApp(blob, filename, phone, message);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't open WhatsApp. Please try again.");
     }
   };
 
@@ -5316,14 +5450,24 @@ function InvoicePrintView({ data, invoice }) {
         <button style={styles.primaryBtn} disabled={exporting} onClick={confirmClick(handlePrint, "Generate and download this PDF?")}>
           <Printer size={15} /> {exporting ? "Generating…" : "Download PDF (Invoice + Pending Items & Balance)"}
         </button>
-        <button
-          className="mobile-only"
-          style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }}
-          disabled={sharing}
-          onClick={confirmClick(handleShare, "Generate the invoice PDF and open WhatsApp share?")}
-        >
-          <MessageCircle size={15} /> {sharing ? "Preparing…" : "Share to WhatsApp"}
-        </button>
+        {shareReady ? (
+          <button
+            className="mobile-only"
+            style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }}
+            onClick={confirmClick(sendShare, "Open WhatsApp now?")}
+          >
+            <MessageCircle size={15} /> Send now
+          </button>
+        ) : (
+          <button
+            className="mobile-only"
+            style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }}
+            disabled={sharing}
+            onClick={confirmClick(prepareShare, "Generate the invoice PDF and open WhatsApp share?")}
+          >
+            <MessageCircle size={15} /> {sharing ? "Preparing…" : "Share to WhatsApp"}
+          </button>
+        )}
       </div>
       <InvoiceSheet data={data} invoice={invoice} />
       {/* Off-screen node used purely for PDF capture — never shown, only
