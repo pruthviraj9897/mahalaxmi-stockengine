@@ -2904,6 +2904,7 @@ function ChallanTermsFooter({ rentLines }) {
         marginTop: 28, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
         fontFamily: "'Public Sans', system-ui, sans-serif",
       }}>
+        <CompanyContactLine />
         <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
           <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Received By</div>
         </div>
@@ -2939,6 +2940,7 @@ function ReturnChallanFooter() {
         marginTop: 28, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
         fontFamily: "'Public Sans', system-ui, sans-serif",
       }}>
+        <CompanyContactLine />
         <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
           <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Challan Maker's Signature</div>
         </div>
@@ -2946,6 +2948,24 @@ function ReturnChallanFooter() {
           <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>Returner's Signature</div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Company contact line printed on Delivery Challan, Return Challan and
+// Invoice — a fixed "for queries, contact:" block distinct from the party's
+// own phone/address, which are already shown in the header above.
+const COMPANY_CONTACTS = [
+  { name: "Kenil Savaliya", phone: "9925975379" },
+  { name: "Kaushik Bajariya", phone: "9769963261" },
+];
+function CompanyContactLine() {
+  return (
+    <div style={{ fontFamily: "'Public Sans', system-ui, sans-serif", fontSize: 10.5, color: COLORS.muted, lineHeight: 1.6 }}>
+      <div style={{ fontWeight: 700, color: COLORS.amberDeep, marginBottom: 2 }}>For Queries, Contact</div>
+      {COMPANY_CONTACTS.map((c, i) => (
+        <div key={i}>{c.name}: {c.phone}</div>
+      ))}
     </div>
   );
 }
@@ -4706,8 +4726,11 @@ function InvoiceSheet({ data, invoice }) {
             marginTop: 32, paddingTop: 14, borderTop: `1px solid ${COLORS.border}`,
             fontFamily: "'Public Sans', system-ui, sans-serif",
           }}>
-            <div style={{ fontSize: 11, color: COLORS.muted, fontStyle: "italic" }}>
-              Thank you for your business.
+            <div>
+              <CompanyContactLine />
+              <div style={{ fontSize: 11, color: COLORS.muted, fontStyle: "italic", marginTop: 6 }}>
+                Thank you for your business.
+              </div>
             </div>
             <div style={{ fontSize: 11.5, color: COLORS.ink, textAlign: "center" }}>
               <div style={{ borderTop: `1px solid ${COLORS.ink}`, paddingTop: 4, minWidth: 140 }}>
