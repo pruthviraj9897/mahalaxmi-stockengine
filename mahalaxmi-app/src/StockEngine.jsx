@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Package, Truck, RotateCcw, Users, Boxes, LayoutGrid, Plus, Trash2, AlertCircle, CheckCircle2, FileText, Archive, Printer, Download, Upload, History, Pencil, X, Ban, Settings, LogOut, Menu, Wallet, Receipt, IndianRupee } from "lucide-react";
+import { Package, Truck, RotateCcw, Users, Boxes, LayoutGrid, Plus, Trash2, AlertCircle, CheckCircle2, FileText, Archive, Printer, Download, Upload, History, Pencil, X, Ban, Settings, LogOut, Menu, Wallet, Receipt, IndianRupee, MessageCircle } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const STORAGE_KEY = "mlx-stockengine-v1";
@@ -134,6 +134,143 @@ async function downloadNodeAsPdf(node, filename) {
 async function pdfBlobFromNode(node) {
   const pdf = await renderNodeToPdf(node);
   return pdf.output("blob");
+}
+
+// ---- WHATSAPP SHARE (mobile only) ----------------------------------------
+// WhatsApp has no public API that lets a website attach a file directly into
+// a specific contact's chat — that only exists behind Meta's approved
+// WhatsApp Business API (message templates, business verification), not a
+// simple client-side call. What we *can* do, and what every consumer app
+// does for this: use the browser's native Web Share API with a file
+// attached. On Android Chrome and iOS Safari this opens the OS share sheet
+// with the PDF pre-attached — picking WhatsApp there drops straight into
+// the chat with the file already attached, contact chosen by the person.
+// Where file-sharing via Web Share isn't available, we fall back to
+// downloading the PDF and opening WhatsApp (to the right contact, if we
+// have their number) with a message pre-filled — the person just attaches
+// the file that was downloaded a moment ago.
+
+// Normalizes a Party Master phone number into the digits-only, country-code
+// prefixed format wa.me / WhatsApp expect. Assumes India (91) for plain
+// 10-digit numbers, since that's what Party Master captures today.
+function toWhatsAppNumber(raw) {
+  const digits = String(raw || "").replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.length === 10) return "91" + digits;
+  return digits; // already has a country code, or an unusual format — best effort
+}
+
+// Shares one PDF Blob to WhatsApp for a single party/contact. Returns a
+// short status string the caller can use to show the right follow-up
+// message: "shared" (native share sheet opened), "fallback" (downloaded +
+// wa.me opened instead), "cancelled" (person backed out of the share
+// sheet), or throws on a hard failure.
+async function sharePdfToWhatsApp(blob, filename, phoneRaw, message) {
+  const fname = filename.toLowerCase().endsWith(".pdf") ? filename : filename + ".pdf";
+  const file = new File([blob], fname, { type: "application/pdf" });
+  const waNumber = toWhatsAppNumber(phoneRaw);
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], text: message || undefined });
+      return "shared";
+    } catch (err) {
+      if (err && err.name === "AbortError") return "cancelled";
+      // fall through to the download + wa.me fallback below
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  const text = encodeURIComponent(message || "");
+  const waUrl = waNumber ? `https://wa.me/${waNumber}?text=${text}` : `https://wa.me/?text=${text}`;
+  window.open(waUrl, "_blank");
+  return "fallback";
+}
+
+// Reusable "N of total" step-through panel used by every bulk-WhatsApp flow
+// (Delivery, Return, Invoice Archive). Rather than trying to fire off many
+// WhatsApp sends at once — which WhatsApp itself doesn't support outside
+// approved Business API templates — this steps the person through their
+// selected documents one at a time: generate this one's PDF, open the
+// native share sheet (or the download+wa.me fallback), then move to the
+// next. `items` is [{ id, label, phone, buildShare: async () => ({ blob,
+// filename, message }) }].
+function WhatsAppQueuePanel({ items, onClose }) {
+  const [index, setIndex] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState(null); // null | "shared" | "fallback" | "error"
+  const total = items.length;
+  const current = items[index];
+
+  const sendCurrent = async () => {
+    if (!current || busy) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      const { blob, filename, message } = await current.buildShare();
+      const result = await sharePdfToWhatsApp(blob, filename, current.phone, message);
+      setStatus(result === "cancelled" ? null : result);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      setStatus("error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const goNext = () => {
+    setStatus(null);
+    if (index + 1 >= total) onClose();
+    else setIndex(index + 1);
+  };
+
+  if (!current) return null;
+
+  return (
+    <div
+      className="mobile-only"
+      style={{
+        background: "#e9fbf1", border: "1px solid #25D366", borderRadius: 10,
+        padding: "12px 14px", marginTop: 10, marginBottom: 12,
+        fontFamily: "'Public Sans', system-ui, sans-serif",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <strong style={{ fontSize: 13 }}>{index + 1} of {total} — {current.label}</strong>
+        <button style={styles.iconBtn} onClick={confirmClick(onClose, "Stop sharing? Any not-yet-sent documents will be skipped.")} title="Close">
+          <X size={14} />
+        </button>
+      </div>
+      {!current.phone && (
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 4 }}>
+          No mobile number on file for this party — you'll pick the contact manually in WhatsApp.
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} disabled={busy} onClick={sendCurrent}>
+          <MessageCircle size={15} /> {busy ? "Preparing…" : "Share to WhatsApp"}
+        </button>
+        <button style={styles.ghostBtn} onClick={goNext}>{index + 1 >= total ? "Done" : "Next"}</button>
+      </div>
+      {status === "shared" && (
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8 }}>Share sheet opened — pick WhatsApp to send. Tap Next once it's sent.</div>
+      )}
+      {status === "fallback" && (
+        <div style={{ fontSize: 11.5, color: COLORS.muted, marginTop: 8 }}>PDF downloaded and WhatsApp opened — attach the file there. Tap Next once it's sent.</div>
+      )}
+      {status === "error" && (
+        <div style={{ fontSize: 11.5, color: "#b3261e", marginTop: 8 }}>Couldn't prepare this one — try again, or tap Next to skip it.</div>
+      )}
+    </div>
+  );
 }
 
 // Core of the html2canvas → jsPDF pipeline, shared by exportPortalToPdf
@@ -3130,6 +3267,64 @@ function DeliveryEntry({ data, persist, markTyping }) {
     }
   };
 
+  // Mobile-only WhatsApp sharing — single row and bulk queue. Reuses the
+  // same off-screen pdfCaptureRef portal as downloadChallanPdf, just returns
+  // a Blob (via pdfBlobFromNode) instead of triggering a save-to-disk.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [waQueue, setWaQueue] = useState(null);
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const buildChallanShare = async (c) => {
+    setPdfChallan(c);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const blob = await pdfBlobFromNode(pdfCaptureRef.current);
+      const party = data.parties.find((p) => p.id === c.partyId);
+      return {
+        blob,
+        filename: `Delivery Challan ${c.challanNo} - ${sanitizeForFilename(partyName(data, c.partyId))}`,
+        message: `Delivery Challan No. ${c.challanNo}, dated ${fmtDateDisplay(c.date)}.`,
+        phone: party?.phone || "",
+      };
+    } finally {
+      setPdfChallan(null);
+    }
+  };
+  const shareChallanToWhatsApp = async (c) => {
+    if (exportingId) return;
+    setExportingId(c.id);
+    try {
+      const { blob, filename, message, phone } = await buildChallanShare(c);
+      await sharePdfToWhatsApp(blob, filename, phone, message);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't prepare the PDF. Please try again.");
+    } finally {
+      setExportingId(null);
+    }
+  };
+  const startBulkShare = () => {
+    const chosen = sortedChallans.filter((c) => selectedIds.has(c.id));
+    if (chosen.length === 0) return;
+    setWaQueue(
+      chosen.map((c) => ({
+        id: c.id,
+        label: `#${c.challanNo} — ${partyName(data, c.partyId)}`,
+        phone: data.parties.find((p) => p.id === c.partyId)?.phone || "",
+        buildShare: () => buildChallanShare(c),
+      }))
+    );
+  };
+  const closeWaQueue = () => {
+    setWaQueue(null);
+    setSelectedIds(new Set());
+  };
+
   const setLine = (idx, patch) => {
     const next = [...lines];
     next[idx] = { ...next[idx], ...patch };
@@ -3320,9 +3515,26 @@ function DeliveryEntry({ data, persist, markTyping }) {
                 partyName(data, c.partyId),
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
                 fmtDateTime(c.updatedAt || c.createdAt),
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    className="mobile-only"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() => toggleSelected(c.id)}
+                    style={{ width: 16, height: 16 }}
+                    title="Select for WhatsApp"
+                  />
                   <button style={styles.iconBtn} disabled={!!exportingId} onClick={confirmClick(() => downloadChallanPdf(c), "Generate and download the PDF?")} title="Download PDF">
                     <Download size={14} />
+                  </button>
+                  <button
+                    className="mobile-only"
+                    style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
+                    disabled={!!exportingId}
+                    onClick={confirmClick(() => shareChallanToWhatsApp(c), "Generate the PDF and open WhatsApp share?")}
+                    title="Share to WhatsApp"
+                  >
+                    <MessageCircle size={14} />
                   </button>
                   <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit challan"><Pencil size={14} /></button>
                   <ConfirmDelete
@@ -3337,6 +3549,25 @@ function DeliveryEntry({ data, persist, markTyping }) {
               ])}
             />
             )}
+            {selectedIds.size > 0 && (
+              <div
+                className="mobile-only"
+                style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                  padding: "8px 12px", marginTop: 10,
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{selectedIds.size} selected</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={styles.ghostBtn} onClick={confirmClick(() => setSelectedIds(new Set()), "Clear selection?")}>Clear</button>
+                  <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} onClick={confirmClick(startBulkShare, "Start sharing the selected challans to WhatsApp, one at a time?")}>
+                    <MessageCircle size={14} /> Share to WhatsApp
+                  </button>
+                </div>
+              </div>
+            )}
+            {waQueue && <WhatsAppQueuePanel items={waQueue} onClose={closeWaQueue} />}
           </>
         )}
       </Panel>
@@ -3387,6 +3618,63 @@ function ReturnEntry({ data, persist, markTyping }) {
       setExportingId(null);
       setPdfChallan(null);
     }
+  };
+
+  // Mobile-only WhatsApp sharing — single row and bulk queue. Same pattern
+  // as DeliveryEntry's equivalent above.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [waQueue, setWaQueue] = useState(null);
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const buildChallanShare = async (c) => {
+    setPdfChallan(c);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const blob = await pdfBlobFromNode(pdfCaptureRef.current);
+      const party = data.parties.find((p) => p.id === c.partyId);
+      return {
+        blob,
+        filename: `Return Challan ${c.returnChallanNo} - ${sanitizeForFilename(partyName(data, c.partyId))}`,
+        message: `Return Challan No. ${c.returnChallanNo}, dated ${fmtDateDisplay(c.date)}.`,
+        phone: party?.phone || "",
+      };
+    } finally {
+      setPdfChallan(null);
+    }
+  };
+  const shareChallanToWhatsApp = async (c) => {
+    if (exportingId) return;
+    setExportingId(c.id);
+    try {
+      const { blob, filename, message, phone } = await buildChallanShare(c);
+      await sharePdfToWhatsApp(blob, filename, phone, message);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't prepare the PDF. Please try again.");
+    } finally {
+      setExportingId(null);
+    }
+  };
+  const startBulkShare = () => {
+    const chosen = sortedChallans.filter((c) => selectedIds.has(c.id));
+    if (chosen.length === 0) return;
+    setWaQueue(
+      chosen.map((c) => ({
+        id: c.id,
+        label: `#${c.returnChallanNo} — ${partyName(data, c.partyId)}`,
+        phone: data.parties.find((p) => p.id === c.partyId)?.phone || "",
+        buildShare: () => buildChallanShare(c),
+      }))
+    );
+  };
+  const closeWaQueue = () => {
+    setWaQueue(null);
+    setSelectedIds(new Set());
   };
 
   const setLine = (idx, patch) => {
@@ -3595,9 +3883,26 @@ function ReturnEntry({ data, persist, markTyping }) {
                 partyName(data, c.partyId),
                 c.lines.map((l) => `${itemName(data, l.itemId)} × ${l.qty}`).join(", "),
                 fmtDateTime(c.updatedAt || c.createdAt),
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    className="mobile-only"
+                    checked={selectedIds.has(c.id)}
+                    onChange={() => toggleSelected(c.id)}
+                    style={{ width: 16, height: 16 }}
+                    title="Select for WhatsApp"
+                  />
                   <button style={styles.iconBtn} disabled={!!exportingId} onClick={confirmClick(() => downloadChallanPdf(c), "Generate and download the PDF?")} title="Download PDF">
                     <Download size={14} />
+                  </button>
+                  <button
+                    className="mobile-only"
+                    style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
+                    disabled={!!exportingId}
+                    onClick={confirmClick(() => shareChallanToWhatsApp(c), "Generate the PDF and open WhatsApp share?")}
+                    title="Share to WhatsApp"
+                  >
+                    <MessageCircle size={14} />
                   </button>
                   <button style={styles.iconBtn} onClick={confirmClick(() => startEdit(c), "Edit this record?")} title="Edit return"><Pencil size={14} /></button>
                   <ConfirmDelete
@@ -3612,6 +3917,25 @@ function ReturnEntry({ data, persist, markTyping }) {
               ])}
             />
             )}
+            {selectedIds.size > 0 && (
+              <div
+                className="mobile-only"
+                style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                  padding: "8px 12px", marginTop: 10,
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{selectedIds.size} selected</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={styles.ghostBtn} onClick={confirmClick(() => setSelectedIds(new Set()), "Clear selection?")}>Clear</button>
+                  <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} onClick={confirmClick(startBulkShare, "Start sharing the selected return challans to WhatsApp, one at a time?")}>
+                    <MessageCircle size={14} /> Share to WhatsApp
+                  </button>
+                </div>
+              </div>
+            )}
+            {waQueue && <WhatsAppQueuePanel items={waQueue} onClose={closeWaQueue} />}
           </>
         )}
       </Panel>
@@ -4485,6 +4809,70 @@ function InvoiceArchive({ data, persist }) {
   const [collapsedMonths, setCollapsedMonths] = useState(() => new Set());
   const selected = data.invoices.find((i) => i.id === selectedId);
 
+  // Mobile-only WhatsApp sharing — single row and bulk queue. Shares just
+  // the Invoice PDF itself (not the companion Pending Items & Balance
+  // statement bundled by the Download button) so the file stays a single
+  // clean attachment for a WhatsApp chat. Uses its own off-screen capture
+  // portal since InvoiceArchive rows don't otherwise render a PDF.
+  const [pdfInvoice, setPdfInvoice] = useState(null);
+  const [exportingId, setExportingId] = useState(null);
+  const shareCaptureRef = useRef(null);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [waQueue, setWaQueue] = useState(null);
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const buildInvoiceShare = async (inv) => {
+    setPdfInvoice(inv);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const blob = await pdfBlobFromNode(shareCaptureRef.current);
+      const party = data.parties.find((p) => p.id === inv.partyId);
+      const total = Number((inv.gst?.applicable ? (inv.finalTotal ?? inv.netTotal) : inv.netTotal) || 0).toFixed(2);
+      return {
+        blob,
+        filename: `Invoice ${inv.invoiceNo} - ${sanitizeForFilename(partyName(data, inv.partyId))}`,
+        message: `Invoice #${inv.invoiceNo}, dated ${fmtDateDisplay(inv.invoiceDate)} — Total ₹${total}.`,
+        phone: party?.phone || "",
+      };
+    } finally {
+      setPdfInvoice(null);
+    }
+  };
+  const shareInvoiceToWhatsApp = async (inv) => {
+    if (exportingId) return;
+    setExportingId(inv.id);
+    try {
+      const { blob, filename, message, phone } = await buildInvoiceShare(inv);
+      await sharePdfToWhatsApp(blob, filename, phone, message);
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't prepare the PDF. Please try again.");
+    } finally {
+      setExportingId(null);
+    }
+  };
+  const startBulkShare = () => {
+    const chosen = data.invoices.filter((inv) => selectedIds.has(inv.id));
+    if (chosen.length === 0) return;
+    setWaQueue(
+      chosen.map((inv) => ({
+        id: inv.id,
+        label: `#${inv.invoiceNo} — ${partyName(data, inv.partyId)}`,
+        phone: data.parties.find((p) => p.id === inv.partyId)?.phone || "",
+        buildShare: () => buildInvoiceShare(inv),
+      }))
+    );
+  };
+  const closeWaQueue = () => {
+    setWaQueue(null);
+    setSelectedIds(new Set());
+  };
+
   const voidInvoice = (id) => {
     const inv = data.invoices.find((x) => x.id === id);
     if (!inv) return;
@@ -4551,8 +4939,25 @@ function InvoiceArchive({ data, persist }) {
         <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmVoidId(null), "Are you sure?")} title="Cancel"><X size={14} /></button>
       </div>
     ) : (
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input
+          type="checkbox"
+          className="mobile-only"
+          checked={selectedIds.has(inv.id)}
+          onChange={() => toggleSelected(inv.id)}
+          style={{ width: 16, height: 16 }}
+          title="Select for WhatsApp"
+        />
         <button style={styles.ghostBtn} onClick={confirmClick(() => setSelectedId(inv.id), "Are you sure?")}><Printer size={13} /> View</button>
+        <button
+          className="mobile-only"
+          style={{ ...styles.iconBtn, color: "#128C7E", borderColor: "#128C7E" }}
+          disabled={!!exportingId}
+          onClick={confirmClick(() => shareInvoiceToWhatsApp(inv), "Generate the invoice PDF and open WhatsApp share?")}
+          title="Share to WhatsApp"
+        >
+          <MessageCircle size={14} />
+        </button>
         <button style={styles.iconBtn} onClick={confirmClick(() => setConfirmVoidId(inv.id), "Are you sure?")} title="Void invoice"><Ban size={14} /></button>
       </div>
     ),
@@ -4578,6 +4983,25 @@ function InvoiceArchive({ data, persist }) {
               />
               <PartyFilter parties={data.parties} value={filterPartyId} onChange={setFilterPartyId} />
             </div>
+            {selectedIds.size > 0 && (
+              <div
+                className="mobile-only"
+                style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8,
+                  padding: "8px 12px", marginBottom: 12,
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>{selectedIds.size} selected</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button style={styles.ghostBtn} onClick={confirmClick(() => setSelectedIds(new Set()), "Clear selection?")}>Clear</button>
+                  <button style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }} onClick={confirmClick(startBulkShare, "Start sharing the selected invoices to WhatsApp, one at a time?")}>
+                    <MessageCircle size={14} /> Share to WhatsApp
+                  </button>
+                </div>
+              </div>
+            )}
+            {waQueue && <WhatsAppQueuePanel items={waQueue} onClose={closeWaQueue} />}
             {sortedInvoices.length === 0 ? (
               <Empty text="No invoices for this party." />
             ) : (
@@ -4621,6 +5045,11 @@ function InvoiceArchive({ data, persist }) {
         )}
       </Panel>
       {selected && <InvoicePrintView data={data} invoice={selected} />}
+      {/* Off-screen node used purely for PDF capture when sharing straight
+          to WhatsApp from the archive list — see buildInvoiceShare above. */}
+      <PrintPortal extraClass="print-portal--invoice-archive-share" domRef={shareCaptureRef}>
+        {pdfInvoice && <InvoiceSheet data={data} invoice={pdfInvoice} />}
+      </PrintPortal>
     </div>
   );
 }
@@ -4856,11 +5285,49 @@ function InvoicePrintView({ data, invoice }) {
     }
   };
 
+  // Mobile-only "Share to WhatsApp" — shares just the Invoice PDF itself
+  // (not the companion statement bundled by Download above), reusing the
+  // same off-screen capture node.
+  const [sharing, setSharing] = useState(false);
+  const handleShare = async () => {
+    if (sharing) return;
+    setSharing(true);
+    try {
+      const party = data.parties.find((p) => p.id === invoice.partyId);
+      const partyLabel = sanitizeForFilename(party ? party.name : "Invoice");
+      const total = Number((invoice.gst?.applicable ? (invoice.finalTotal ?? invoice.netTotal) : invoice.netTotal) || 0).toFixed(2);
+
+      setCapture({ kind: "invoice" });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const blob = await pdfBlobFromNode(captureRef.current);
+      await sharePdfToWhatsApp(
+        blob,
+        `Invoice ${invoice.invoiceNo} - ${partyLabel}`,
+        party?.phone || "",
+        `Invoice #${invoice.invoiceNo}, dated ${fmtDateDisplay(invoice.invoiceDate)} — Total ₹${total}.`
+      );
+    } catch (err) {
+      console.error("WhatsApp share failed:", err);
+      alert("Couldn't prepare the PDF. Please try again.");
+    } finally {
+      setSharing(false);
+      setCapture(null);
+    }
+  };
+
   return (
     <Panel title={`Invoice #${invoice.invoiceNo}`}>
-      <div className="no-print" style={{ marginBottom: 14 }}>
+      <div className="no-print" style={{ marginBottom: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button style={styles.primaryBtn} disabled={exporting} onClick={confirmClick(handlePrint, "Generate and download this PDF?")}>
           <Printer size={15} /> {exporting ? "Generating…" : "Download PDF (Invoice + Pending Items & Balance)"}
+        </button>
+        <button
+          className="mobile-only"
+          style={{ ...styles.primaryBtn, background: "#25D366", borderColor: "#25D366" }}
+          disabled={sharing}
+          onClick={confirmClick(handleShare, "Generate the invoice PDF and open WhatsApp share?")}
+        >
+          <MessageCircle size={15} /> {sharing ? "Preparing…" : "Share to WhatsApp"}
         </button>
       </div>
       <InvoiceSheet data={data} invoice={invoice} />
