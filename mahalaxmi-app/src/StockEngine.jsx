@@ -19,6 +19,71 @@ function confirmClick(action, message = "Are you sure?") {
   };
 }
 
+// Drives the "Install app" button using the standard beforeinstallprompt
+// flow (Chrome/Edge on Android/desktop). Chrome can fire beforeinstallprompt
+// very early — before React has mounted and a useEffect inside a component
+// would have attached its listener — so we capture it here at module scope,
+// which runs immediately on script load, well before any component exists.
+// A tiny pub-sub lets any component using the hook pick up the event
+// whenever it mounts, even if it fired earlier. `installed` also flips on
+// appinstalled so the button disappears immediately after a successful
+// install. There is no JS event for "user uninstalled the PWA" later — but
+// once that happens the browser stops treating the site as installed, so it
+// simply fires beforeinstallprompt again on a later visit and the button
+// comes back on its own; no extra code needed for that part.
+let capturedInstallPrompt = null;
+let installPromptSubscribers = [];
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    capturedInstallPrompt = e;
+    installPromptSubscribers.forEach((fn) => fn(e));
+  });
+  window.addEventListener("appinstalled", () => {
+    capturedInstallPrompt = null;
+    installPromptSubscribers.forEach((fn) => fn(null));
+  });
+}
+
+function useInstallPrompt() {
+  const [prompt, setPrompt] = useState(capturedInstallPrompt);
+  const [installed, setInstalled] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return (
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) ||
+      window.navigator.standalone === true
+    );
+  });
+
+  useEffect(() => {
+    const onChange = (e) => {
+      if (e === null) {
+        setInstalled(true);
+        setPrompt(null);
+      } else {
+        setPrompt(e);
+      }
+    };
+    installPromptSubscribers.push(onChange);
+    // Pick up anything that arrived between module load and this mount.
+    if (capturedInstallPrompt) setPrompt(capturedInstallPrompt);
+    return () => {
+      installPromptSubscribers = installPromptSubscribers.filter((fn) => fn !== onChange);
+    };
+  }, []);
+
+  const promptInstall = async () => {
+    if (!prompt) return;
+    prompt.prompt();
+    await prompt.userChoice;
+    capturedInstallPrompt = null;
+    setPrompt(null);
+  };
+
+  return { canInstall: !!prompt && !installed, promptInstall };
+}
+
 // Gives a form a ref for its results list plus a scrollToList() call to make
 // after a save, so the person lands on the row they just added/edited
 // instead of having to scroll down manually to find it. The rAF delay lets
@@ -1674,13 +1739,70 @@ function parseFeet(itemName) {
   return m ? parseInt(m[1], 10) : null;
 }
 
+// Every tab id the sidebar/bottom-nav can route to — kept in sync with the
+// `nav` array built inside StockEngine(). Needs to live outside the
+// component (usable before first render, no dependency on `data`) since
+// usePersistedTab's initial state read runs before the component body does.
+const VALID_TAB_IDS = [
+  "dashboard", "parties", "items", "delivery", "return", "invoice",
+  "bulkInvoice", "archive", "ledger", "receivePayment", "balances",
+  "expenses", "recyclebin", "backup", "settings",
+];
+
+// Remembers which tab was last open, in localStorage, so that when Android
+// (or a backgrounded browser tab) force-reloads an installed PWA, the
+// person lands back where they were instead of on the dashboard. A tapped
+// notification / deep link (?tab=...) wins over the saved tab if present.
+// `validIds` guards against a stale saved id from a previous version of the
+// app that no longer exists (falls back to `defaultId` instead of crashing).
+function usePersistedTab(storageKey, defaultId, validIds) {
+  const [tab, setTab] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const requested = params.get("tab");
+      if (requested && validIds.includes(requested)) return requested;
+    } catch {
+      // URL parsing unavailable — fall through to localStorage
+    }
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (saved && validIds.includes(saved)) return saved;
+    } catch {
+      // localStorage unavailable (private browsing, etc.) — just use default
+    }
+    return defaultId;
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, tab);
+    } catch {
+      // ignore — non-critical convenience feature
+    }
+  }, [storageKey, tab]);
+  // Clear a ?tab= param once consumed, so a later manual refresh restores
+  // the normal last-open tab instead of re-jumping to the same deep link.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("tab")) {
+        url.searchParams.delete("tab");
+        window.history.replaceState({}, "", url);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+  return [tab, setTab];
+}
+
 export default function StockEngine({ session, onLogout }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = usePersistedTab("mlx-stockengine-tab", "dashboard", VALID_TAB_IDS);
   const [navOpen, setNavOpen] = useState(false); // legacy drawer (desktop-only fallback)
   const [moreOpen, setMoreOpen] = useState(false); // mobile bottom-sheet for secondary sections
+  const { canInstall, promptInstall } = useInstallPrompt();
 
   // Injects the app's global stylesheet (incl. @media print rules) into
   // <head>. This MUST live in <head>, not nested inside .app-shell — print
@@ -1921,6 +2043,15 @@ export default function StockEngine({ session, onLogout }) {
               {session.user.email}
             </div>
           )}
+          {canInstall && (
+            <button
+              onClick={promptInstall}
+              style={{ ...styles.navBtn, width: "100%", justifyContent: "flex-start", marginBottom: 3 }}
+            >
+              <Download size={16} strokeWidth={2} />
+              Install app
+            </button>
+          )}
           <button
             onClick={confirmClick(onLogout, "Log out of your account?")}
             style={{ ...styles.navBtn, width: "100%", justifyContent: "flex-start" }}
@@ -1937,6 +2068,11 @@ export default function StockEngine({ session, onLogout }) {
             you're typing instead of scrolling out of view at the bottom of
             the sidebar. */}
         <div style={styles.mainTopBar}>
+          {canInstall && (
+            <button style={styles.installBtn} onClick={promptInstall}>
+              <Download size={13} strokeWidth={2} /> Install app
+            </button>
+          )}
           <SaveStatus saveState={saveState} retrySave={retrySave} />
         </div>
         <div className="main-content-inner" style={styles.mainInner}>
@@ -2008,6 +2144,12 @@ export default function StockEngine({ session, onLogout }) {
                   </button>
                 );
               })}
+            {canInstall && (
+              <button onClick={promptInstall}>
+                <Download size={17} strokeWidth={2} />
+                Install app
+              </button>
+            )}
             <button onClick={confirmClick(onLogout, "Log out of your account?")}>
               <LogOut size={17} strokeWidth={2} />
               Log out
@@ -7280,8 +7422,14 @@ const styles = {
   main: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", minHeight: 0 },
   mainTopBar: {
     position: "sticky", top: 0, zIndex: 20, flexShrink: 0,
-    display: "flex", alignItems: "center", justifyContent: "flex-end",
+    display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 14,
     padding: "10px 34px", background: COLORS.panel, borderBottom: `1px solid ${COLORS.border}`,
+  },
+  installBtn: {
+    display: "flex", alignItems: "center", gap: 5, height: 28, padding: "0 10px",
+    background: COLORS.amber, border: "none", borderRadius: 5, color: "#fff",
+    cursor: "pointer", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap",
+    fontFamily: "'Public Sans', system-ui, sans-serif", flexShrink: 0,
   },
   mainInner: { padding: "28px 34px 60px" },
   pageHeader: { marginBottom: 22, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 14 },
