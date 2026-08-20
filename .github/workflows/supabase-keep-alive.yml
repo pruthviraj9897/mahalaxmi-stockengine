@@ -1,0 +1,38 @@
+name: Supabase Keep-Alive
+
+# Pings the Supabase database on a schedule so the project never sits
+# idle for 7 days and gets auto-paused on the free tier.
+# Supabase requires an actual database query (not just any HTTP hit)
+# to count as activity, so this queries the "app_state" table.
+
+on:
+  schedule:
+    # Runs every Monday and Thursday at 03:00 UTC.
+    # Twice a week gives a safe buffer under the 7-day pause window,
+    # even if one run is skipped or delayed.
+    - cron: "0 3 * * 1,4"
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab to test
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Supabase to reset the inactivity timer
+        run: |
+          http_code=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            "${SUPABASE_URL}/rest/v1/app_state?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_ANON_KEY}")
+
+          echo "HTTP status: $http_code"
+          echo "Response body:"
+          cat /tmp/response.json
+          echo ""
+
+          if [ -z "$http_code" ]; then
+            echo "No response received from Supabase — ping failed."
+            exit 1
+          fi
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
