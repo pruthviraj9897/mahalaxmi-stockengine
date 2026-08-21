@@ -1993,7 +1993,7 @@ export default function StockEngine({ session, onLogout }) {
           <Menu size={20} strokeWidth={2} />
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={styles.brandMark}>M</div>
+          <img src="/logo.png" alt="Mahalaxmi Rent Depot" style={styles.brandMark} />
           <div style={{ fontSize: 14.5, fontWeight: 700, letterSpacing: 0.2, color: COLORS.ink }}>
             Mahalaxmi
           </div>
@@ -2005,10 +2005,10 @@ export default function StockEngine({ session, onLogout }) {
 
       <aside className={`sidebar${navOpen ? " sidebar-open" : ""}`} style={styles.sidebar}>
         <div style={styles.brand}>
-          <div style={styles.brandMark}>M</div>
+          <img src="/logo.png" alt="Mahalaxmi Rent Depot" style={styles.brandMark} />
           <div>
             <div style={styles.brandName}>Mahalaxmi</div>
-            <div style={styles.brandSub}>Stock Engine</div>
+            <div style={styles.brandSub}>Rent Depot</div>
           </div>
           <button
             className="mobile-close-btn"
@@ -7402,9 +7402,7 @@ const styles = {
   },
   brand: { display: "flex", alignItems: "center", gap: 10, padding: "4px 6px 22px" },
   brandMark: {
-    width: 32, height: 32, borderRadius: 6, background: COLORS.amber, color: "#fff",
-    display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 16,
-    fontFamily: "'Public Sans', system-ui, sans-serif",
+    width: 32, height: 32, borderRadius: "50%", objectFit: "cover", flexShrink: 0,
   },
   brandName: { fontSize: 14.5, fontWeight: 700, letterSpacing: 0.2 },
   brandSub: { fontSize: 11, color: "#a89a83", letterSpacing: 0.5, textTransform: "uppercase" },

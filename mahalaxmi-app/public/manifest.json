@@ -1,6 +1,6 @@
 {
-  "name": "Mahalaxmi Stock Engine",
-  "short_name": "StockEngine",
+  "name": "Mahalaxmi Rent Depot",
+  "short_name": "Mahalaxmi",
   "description": "Stock, rental, and billing management for Ajanta Digital Tiles and Mahalaxmi Centring Depot",
   "start_url": "/",
   "scope": "/",

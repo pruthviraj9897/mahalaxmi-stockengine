@@ -203,9 +203,9 @@ export default function Login({ onPendingOtpChange }) {
     <div style={styles.wrap}>
       <style>{css}</style>
       <div style={styles.card}>
-        <div style={styles.brandMark}>M</div>
+        <img src="/logo.png" alt="Mahalaxmi Rent Depot" style={styles.brandMark} />
         <div style={styles.brandName}>Mahalaxmi</div>
-        <div style={styles.brandSub}>Stock Engine</div>
+        <div style={styles.brandSub}>Rent Depot</div>
 
         {step === "credentials" && (
           <form onSubmit={checkPasswordAndSendCode} style={styles.form}>
@@ -334,17 +334,10 @@ const styles = {
     boxShadow: "0 4px 24px rgba(36,28,20,0.06)",
   },
   brandMark: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    background: COLORS.amber,
-    color: "#fff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: 700,
-    fontSize: 20,
-    fontFamily: "Georgia, serif",
+    width: 56,
+    height: 56,
+    borderRadius: "50%",
+    objectFit: "cover",
     marginBottom: 10,
   },
   brandName: { fontSize: 17, fontWeight: 700, color: COLORS.ink, fontFamily: "Georgia, serif" },
